@@ -170,7 +170,7 @@ parameter CONF_STR = {
 	"O7,Swap Joysticks,No,Yes;",
 	"-;",
 	"R0,Reset;",
-	"J1,Action, T0;",
+	"J,Action, Delta;",
 	"V,v",`BUILD_DATE
 };
 
@@ -206,7 +206,10 @@ hps_io #(.STRLEN($size(CONF_STR)>>3)) hps_io
 	.status(status),
 
 	.joystick_0(joystick_0),
-	.joystick_1(joystick_1)
+	.joystick_1(joystick_1),
+	
+	.ps2_kbd_clk_out(kb_clk_o),
+	.ps2_kbd_data_out(kb_do)
 );
 
 assign BUFFERMODE = (status[17:16] == 2'b00) ? 2'b01 : (status[17:16] == 2'b01) ? 2'b00 : 2'b10;
@@ -225,20 +228,20 @@ wire clock_locked;
 
 wire clk_sys_ntsc;
 wire clk_sys_pal;
-wire clk_sys = PAL ? clk_sys_pal : clk_sys_ntsc;
+wire clk_sys = clk_sys_ntsc; //PAL ? clk_sys_pal : clk_sys_ntsc;
 
 wire clk_vga_ntsc;
 wire clk_vga_pal;
-wire clk_vga = PAL ? clk_vga_pal : clk_vga_ntsc;
+wire clk_vga = clk_vga_ntsc; //PAL ? clk_vga_pal : clk_vga_ntsc;
 
 wire clk_cpu = (clk_cpu_ctr == div_cpu);
 wire clk_vdc = (clk_vdc_ctr == div_vdc);
 
-reg [4:0] clk_cpu_ctr;
-reg [4:0] clk_vdc_ctr;
+reg [3:0] clk_cpu_ctr;
+reg [3:0] clk_vdc_ctr;
 
-wire div_vdc = PAL ? 4'd5 : 4'd3;
-wire div_cpu = PAL ? 4'd6 : 4'd4;
+wire [3:0] div_vdc = 4'd3; // PAL ? 4'd5 : 4'd3;
+wire [3:0] div_cpu = 4'd4; //PAL ? 4'd6 : 4'd4;
 
 pll pll
 (
@@ -260,7 +263,7 @@ always @(posedge clk_sys) begin
 	else if(ioctl_download) init_reset_n <= 1;
 end
 
-wire reset = ~init_reset_n | buttons[1] | status[0] | ioctl_download | (old_pal != PAL);
+wire reset = ~init_reset_n | buttons[1] | status[0] | ioctl_download; // | (old_pal != PAL);
 
 
 // Clocks:
@@ -300,7 +303,7 @@ vp_console #(0) vp
 	.clk_cpu_en_i   (clk_cpu), // CPU 21.5mhz / 4
 	.clk_vdc_en_i   (clk_vdc), // VDC 21.5mhz / 3
 	
-	.res_n_i        (~reset), // low to reset
+	.res_n_i        (~reset & joy_gnd), // low to reset
 
 	// Cart Data
 	.cart_cs_o      (),
@@ -311,7 +314,7 @@ vp_console #(0) vp
 	.cart_bs0_o     (cart_bank_0),
 	.cart_bs1_o     (cart_bank_1),
 	.cart_psen_n_o  (cart_rd),
-	.cart_t0_i      (joy_gnd), // Some kind of switch/key?
+	.cart_t0_i      (kb_gnd), // kb ack
 	.cart_t0_o      (),
 	.cart_t0_dir_o  (),
 
@@ -336,7 +339,7 @@ vp_console #(0) vp
 	.vbl_o          (VBlank),
 	
 	// Sound
-	.snd_o          (snd_m),
+	.snd_o          (),
 	.snd_vec_o      (snd)
 );
 
@@ -344,16 +347,10 @@ vp_console #(0) vp
 ////////////////////////////  SOUND  ////////////////////////////////////
 
 
-wire snd_m;
 wire [3:0] snd;
-reg [3:0] snd_out;
 
-always @(posedge clk_sys) begin
-		snd_out <= snd;
-end
-
-assign AUDIO_L = {snd_out, 12'b0};// + {2'b0, snd_m, 13'b0};
-assign AUDIO_R = {snd_out, 12'b0};// + {2'b0, snd_m, 13'b0};
+assign AUDIO_L = {3'b0, snd, 9'b0};
+assign AUDIO_R = {3'b0, snd, 9'b0};
 
 
 ////////////////////////////  VIDEO  ////////////////////////////////////
@@ -382,7 +379,24 @@ wire [2:0] scale = status[11:9];
 wire [2:0] sl = scale ? scale - 1'd1 : 3'd0;
 wire       scandoubler =  (scale || forced_scandoubler);
 
-video_mixer #(.LINE_LENGTH(267)) video_mixer
+// video_cleaner video_cleaner
+// (
+// 	.*,
+	
+// 	.clk_vid(clk_vga),
+// 	.ce_pix(clk_vdc),
+// 	.R(colors[23:16]),
+// 	.G(colors[15:8]),
+// 	.B(colors[7:0]),
+	
+// 	.HSync(~HSync),
+// 	.VSync(~VSync),
+	
+// 	.HBlank_out(),
+// 	.VBlank_out()
+// );
+
+video_mixer #(.LINE_LENGTH(320)) video_mixer
 (
 	.*,
 	.HBlank(HBlank),
@@ -401,7 +415,7 @@ video_mixer #(.LINE_LENGTH(267)) video_mixer
 	.B(colors[7:0])
 );
 
-// always @(posedge clk) begin
+// always @(posedge clk_vdc) begin
 // 	reg [8:0] old_count_v;
 
 // 	if(pix_ce_n) begin
@@ -427,13 +441,8 @@ video_mixer #(.LINE_LENGTH(267)) video_mixer
 // 	end
 
 // 	if(pix_ce) begin
-// 		if(hide_overscan) begin
-// 			HBlank <= (hc > (256-8)) || (hc<10);
-// 			VBlank <= (vc > (240-10)) || (vc<6);
-// 		end else begin
-// 			HBlank <= (hc >= 256);
-// 			VBlank <= (vc >= 240);
-// 		end
+// 		HBlank <= (hc >= 256);
+// 		VBlank <= (vc >= 240);
 // 		HSync  <= ((hc >= 277) && (hc <  318));
 // 		VSync  <= ((vc >= 245) && (vc <  254));
 // 	end
@@ -451,8 +460,59 @@ video_mixer #(.LINE_LENGTH(267)) video_mixer
 // [1]  = LEFT
 // [0]  = RIGHT
 
-wire [7:0] kb_dec;
-wire [15:0] kb_enc;
+wire [6:1] kb_dec;
+wire [14:7] kb_enc;
+
+wire kb_clk_o;
+wire kb_do;
+wire [7:0] kb_ascii;
+wire kb_ascii_ack;
+wire kb_read_ack;
+wire kb_released;
+wire kb_gnd;
+
+wire [7:0] kb_data;
+
+
+vp_keymap vp_keymap
+(
+	.clk_i(clk_sys),
+	.res_n_i(~reset),
+	.keyb_dec_i(kb_dec),
+	.keyb_enc_o(kb_enc),
+	
+	.rx_data_ready_i(kb_ascii_ack),
+	.rx_ascii_i(kb_ascii),
+	.rx_released_i(kb_released),
+	.rx_read_o(kb_read_ack)
+);
+
+ps2_keyboard_interface #(
+	.TIMER_60USEC_VALUE_PP(1288), // Num sys_clk for 60usec
+	.TIMER_60USEC_BITS_PP(11),    // Bits needed for timer
+	.TIMER_5USEC_VALUE_PP(107),
+	.TIMER_5USEC_BITS_PP(7)
+) ps2k
+(
+	.clk(clk_sys),
+	.reset(reset),
+	.ps2_clk(kb_clk_o),
+	.ps2_data(kb_do),
+	
+	.rx_extended(),
+	.rx_released(kb_released),
+	.rx_shift_key_on(),
+	.rx_ascii(kb_ascii),
+	.rx_data_ready(kb_ascii_ack),
+
+	.rx_read(kb_read_ack),
+	.tx_data(kb_data),
+	.tx_write(kb_gnd),
+	.tx_write_ack(),
+	.tx_error_no_keyboard_ack()
+);
+
+
 
 
 // Joystick wires are low when pressed
@@ -462,7 +522,7 @@ wire [1:0] joy_down   = {~joya[2], ~joyb[2]};
 wire [1:0] joy_left   = {~joya[1], ~joyb[1]};
 wire [1:0] joy_right  = {~joya[0], ~joyb[0]};
 wire [1:0] joy_action = {~joya[4], ~joyb[4]};
-wire       joy_gnd    = {joya[5]};
+wire       joy_gnd    = {~joya[5]};
 
 
 ////////////////////////////  MEMORY  ///////////////////////////////////
