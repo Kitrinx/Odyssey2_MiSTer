@@ -238,8 +238,8 @@ reg [3:0] clk_cpu_ctr;
 reg [3:0] clk_vdc_ctr;
 
 wire [3:0] div_sys = PAL ? 4'd3 : 4'd5;
-wire [3:0] div_vdc = PAL ? 4'd5 : 4'd3;
-wire [3:0] div_cpu = PAL ? 4'd6 : 4'd4;
+wire [3:0] div_vdc = PAL ? 4'd10 : 4'd6;
+wire [3:0] div_cpu = PAL ? 4'd12 : 4'd8;
 
 
 
@@ -319,12 +319,13 @@ vp_console vp
 	// Cart Data
 	.cart_cs_o      (),
 	.cart_cs_n_o    (),
-	.cart_wr_n_o    (),
-	.cart_a_o       (cart_addr),
-	.cart_d_i       (cart_do),
-	.cart_bs0_o     (cart_bank_0),
-	.cart_bs1_o     (cart_bank_1),
-	.cart_psen_n_o  (cart_rd_n),
+	.cart_wr_n_o    (cart_wr_n),
+	.cart_a_o       (cart_addr),   // Cart Address
+	.cart_d_i       (~cart_rd_n ? cart_do : 8'hFF), // Cart Data
+	.cart_d_o       (cart_di),            // Cart data out
+	.cart_bs0_o     (cart_bank_0), // Bank switch 0
+	.cart_bs1_o     (cart_bank_1), // Bank Switch 1
+	.cart_psen_n_o  (cart_rd_n),   // Program Store Enable (read)
 	.cart_t0_i      (kb_read_ack), // kb ack
 	.cart_t0_o      (),
 	.cart_t0_dir_o  (),
@@ -358,6 +359,15 @@ vp_console vp
 ////////////////////////////  SOUND  ////////////////////////////////////
 
 wire [3:0] snd;
+wire cart_wr_n;
+wire [7:0] cart_di;
+
+// Address bit 10 =  ROM
+// $80 to $FF voice writes
+// Voice bank select:
+// $E4 internal voice rom bank
+// $E8, $E9, and $EA external rom banks
+// T0_i high if SP buffer full
 
 // Convert to 16 bit audio.
 wire [15:0] audio_out = {2'b00, snd, 10'd0};
@@ -499,9 +509,8 @@ always @(posedge clk_sys) begin
 			'hX7C: ps2_ascii <= "*"; // *
 			'hX4A: ps2_ascii <= "/"; // /
 			'hX55: ps2_ascii <= "="; // /
-			// 'hX1F: ps2_ascii <= 8'h31; // gui l / yes
-			// 'hX27: ps2_ascii <= 8'h31; // gui r / no
-			// 'hX11: ps2_ascii <= 8'h31; // alt / clear
+			'hX1F: ps2_ascii <= 8'h11; // gui l / yes
+			'hX27: ps2_ascii <= 8'h12; // gui r / no
 			'hX5A: ps2_ascii <= 8'd10; // enter
 			'hX66: ps2_ascii <= 8'd8; // backspace
 			default: ps2_ascii <= 8'h00;

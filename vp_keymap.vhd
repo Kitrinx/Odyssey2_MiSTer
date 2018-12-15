@@ -91,6 +91,16 @@ begin
             col_v :=  6;
             valid_key_v := true;
 
+          when 11 =>                    -- yes
+            row_v := 11;
+            col_v :=  6;
+            valid_key_v := true;
+
+          when 12 =>                    -- no
+            row_v := 12;
+            col_v :=  6;
+            valid_key_v := true;
+
           when others =>
             for row in row_range_t loop
               for col in col_range_t loop
