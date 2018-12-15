@@ -16,11 +16,9 @@ use ieee.std_logic_1164.all;
 package vp_console_comp_pack is
 
   component vp_console
-    generic (
-      is_pal_g : integer := 1
-    );
     port (
       -- System Interface -----------------------------------------------------
+      is_pal_g       : in  integer;
       clk_i          : in  std_logic;
       clk_cpu_en_i   : in  std_logic;
       clk_vdc_en_i   : in  std_logic;

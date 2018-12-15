@@ -57,12 +57,9 @@ library ieee;
 use ieee.std_logic_1164.all;
 
 entity vp_console is
-
-  generic (
-    is_pal_g : integer := 0
-  );
   port (
     -- System Interface -------------------------------------------------------
+    is_pal_g       : in  integer;
     clk_i          : in  std_logic;
     clk_cpu_en_i   : in  std_logic;
     clk_vdc_en_i   : in  std_logic;
@@ -300,10 +297,8 @@ begin
   -- I8244 VDC
   -----------------------------------------------------------------------------
   vdc_b : i8244_top_sync
-    generic map (
-      is_pal_g => is_pal_g
-    )
     port map (
+      is_pal_g   => is_pal_g,
       clk_i      => clk_i,
       clk_en_i   => clk_vdc_en_i,
       res_n_i    => res_n_i,

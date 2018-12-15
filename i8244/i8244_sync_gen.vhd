@@ -51,10 +51,8 @@ use work.i8244_pack.pos_t;
 
 entity i8244_sync_gen is
 
-  generic (
-    is_pal_g : integer := 1
-  );
   port (
+    is_pal_g      : in  integer;
     clk_i         : in  std_logic;
     clk_en_i      : in  boolean;
     clk_rise_en_o : out boolean;

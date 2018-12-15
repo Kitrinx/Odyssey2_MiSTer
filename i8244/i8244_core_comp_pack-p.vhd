@@ -25,11 +25,9 @@ package i8244_core_comp_pack is
   end component;
 
   component i8244_core
-    generic (
-      is_pal_g : integer := 1
-    );
     port (
       -- System Interface -----------------------------------------------------
+      is_pal_g   : in  integer;
       clk_i      : in  std_logic;
       clk_en_i   : in  std_logic;
       res_n_i    : in  std_logic;
@@ -65,11 +63,9 @@ package i8244_core_comp_pack is
   end component;
 
   component i8244_top_sync
-    generic (
-      is_pal_g : integer := 1
-    );
     port (
       -- System Interface -----------------------------------------------------
+      is_pal_g   : in  integer;
       clk_i      : in  std_logic;
       clk_en_i   : in  std_logic;
       res_n_i    : in  std_logic;

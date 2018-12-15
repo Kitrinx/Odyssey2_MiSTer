@@ -136,7 +136,7 @@ module emu
 
 assign {UART_RTS, UART_TXD, UART_DTR} = 0;
 
-assign AUDIO_S   = 1;
+assign AUDIO_S   = 0;
 assign AUDIO_MIX = 0;
 
 assign LED_USER  = ioctl_download;
@@ -150,7 +150,7 @@ assign {SDRAM_DQ, SDRAM_A, SDRAM_BA, SDRAM_CKE, SDRAM_DQML, SDRAM_DQMH, SDRAM_nW
 assign {DDRAM_CLK, DDRAM_BURSTCNT, DDRAM_ADDR, DDRAM_DIN, DDRAM_BE, DDRAM_RD, DDRAM_WE} = 0;
 assign {SD_SCK, SD_MOSI, SD_CS} = 'Z;
 
-assign SDRAM_CLK = clk_sys;
+assign SDRAM_CLK = CLK_50M;
 
 
 ////////////////////////////  HPS I/O  //////////////////////////////////
@@ -162,7 +162,7 @@ parameter CONF_STR = {
 	"-;",
 	"F,BIN;",
 	"-;",
-	"OE,Video Region,NTSC,PAL;",
+	"OE,System,Odyssey2,Videopac;",
 	"O8,Aspect ratio,4:3,16:9;",
 	"O9B,Scandoubler Fx,None,HQ2x,CRT 25%,CRT 50%,CRT 75%;",
 	"OGH,Buffering,Triple,Single,Low Latency;",
@@ -170,7 +170,7 @@ parameter CONF_STR = {
 	"O7,Swap Joysticks,No,Yes;",
 	"-;",
 	"R0,Reset;",
-	"J,Action, Delta;",
+	"J,Action,Reset,1,2,3,4,5,6,7,8,9,0;",
 	"V,v",`BUILD_DATE
 };
 
@@ -184,7 +184,7 @@ wire [15:0] ioctl_dout;
 wire        ioctl_wait;
 wire        ioctl_wr;
 
-wire [11:0] joystick_0,joystick_1;
+wire [15:0] joystick_0,joystick_1;
 wire [24:0] ps2_mouse;
 
 hps_io #(.STRLEN($size(CONF_STR)>>3)) hps_io
@@ -207,18 +207,17 @@ hps_io #(.STRLEN($size(CONF_STR)>>3)) hps_io
 
 	.joystick_0(joystick_0),
 	.joystick_1(joystick_1),
-	
-	.ps2_kbd_clk_out(kb_clk_o),
-	.ps2_kbd_data_out(kb_do)
+
+	.ps2_key(ps2_key)
 );
 
 assign BUFFERMODE = (status[17:16] == 2'b00) ? 2'b01 : (status[17:16] == 2'b01) ? 2'b00 : 2'b10;
 
-wire       PAL = status[15];
+wire       PAL = status[14];
 wire       joy_swap = status[7];
 
-wire [11:0] joya = joy_swap ? joystick_1 : joystick_0;
-wire [11:0] joyb = joy_swap ? joystick_0 : joystick_1;
+wire [15:0] joya = joy_swap ? joystick_1 : joystick_0;
+wire [15:0] joyb = joy_swap ? joystick_0 : joystick_1;
 
 
 ///////////////////////  CLOCK/RESET  ///////////////////////////////////
@@ -226,54 +225,65 @@ wire [11:0] joyb = joy_swap ? joystick_0 : joystick_1;
 
 wire clock_locked;
 
-wire clk_sys_ntsc;
-wire clk_sys_pal;
-wire clk_sys = clk_sys_ntsc; //PAL ? clk_sys_pal : clk_sys_ntsc;
+wire clk_sys_o2;
+wire clk_sys_vp;
+wire clk_vid;
 
-wire clk_vga_ntsc;
-wire clk_vga_pal;
-wire clk_vga = clk_vga_ntsc; //PAL ? clk_vga_pal : clk_vga_ntsc;
-
+//wire clk_sys = (clk_sys_ctr == div_sys);
 wire clk_cpu = (clk_cpu_ctr == div_cpu);
 wire clk_vdc = (clk_vdc_ctr == div_vdc);
 
+reg [3:0] clk_sys_ctr;
 reg [3:0] clk_cpu_ctr;
 reg [3:0] clk_vdc_ctr;
 
-wire [3:0] div_vdc = 4'd3; // PAL ? 4'd5 : 4'd3;
-wire [3:0] div_cpu = 4'd4; //PAL ? 4'd6 : 4'd4;
+wire [3:0] div_sys = PAL ? 4'd3 : 4'd5;
+wire [3:0] div_vdc = PAL ? 4'd5 : 4'd3;
+wire [3:0] div_cpu = PAL ? 4'd6 : 4'd4;
+
+
+
+wire clk_sys = (PAL ? clk_sys_vp : clk_sys_o2);
 
 pll pll
 (
 	.refclk(CLK_50M),
 	.rst(0),
-	.outclk_0(clk_sys_ntsc),
-	.outclk_1(clk_sys_pal),
-	.outclk_2(clk_vga_ntsc),
-	.outclk_3(clk_vga_pal),
+	.outclk_0(clk_sys_o2),
+	.outclk_1(clk_sys_vp),
+	.outclk_2(clk_vid),
+	
 	.locked(clock_locked)
 );
 
 // hold machine in reset until first download starts
 reg init_reset_n = 0;
 reg old_pal = 0;
+
 always @(posedge clk_sys) begin
 	old_pal <= PAL;
 	if(RESET) init_reset_n <= 0;
 	else if(ioctl_download) init_reset_n <= 1;
 end
 
-wire reset = ~init_reset_n | buttons[1] | status[0] | ioctl_download; // | (old_pal != PAL);
-
+wire reset = ~init_reset_n | buttons[1] | status[0] | ioctl_download | (old_pal != PAL);
 
 // Clocks:
+// Master:     107.375      106.407
 // Standard    NTSC         PAL
+// Sys Div     5            3
 // Main clock  21.477 MHz   35.469 MHz
 // VDC divider 3            5
 // VDC clock   7.159 MHz    7.094 MHz
 // CPU divider 4            6
 // CPU clock   5.369 MHz    5.911 MHz
 
+// always @(posedge clk_master) begin
+// 	if (clk_sys_ctr >= div_sys)
+// 		clk_sys_ctr <= 4'd1;
+// 	else
+// 		clk_sys_ctr <= clk_sys_ctr + 4'd1;
+// end
 
 always @(posedge clk_sys or posedge reset) begin
 	if (reset) begin
@@ -296,14 +306,15 @@ end
 ////////////////////////////  SYSTEM  ///////////////////////////////////
 
 
-vp_console #(0) vp
+vp_console vp
 (
 	// System
-	.clk_i          (clk_sys),   // 21.5mhz
-	.clk_cpu_en_i   (clk_cpu), // CPU 21.5mhz / 4
-	.clk_vdc_en_i   (clk_vdc), // VDC 21.5mhz / 3
+	.is_pal_g       (PAL),
+	.clk_i          (clk_sys),
+	.clk_cpu_en_i   (clk_cpu),
+	.clk_vdc_en_i   (clk_vdc),
 	
-	.res_n_i        (~reset & joy_gnd), // low to reset
+	.res_n_i        (~reset & joy_reset), // low to reset
 
 	// Cart Data
 	.cart_cs_o      (),
@@ -313,8 +324,8 @@ vp_console #(0) vp
 	.cart_d_i       (cart_do),
 	.cart_bs0_o     (cart_bank_0),
 	.cart_bs1_o     (cart_bank_1),
-	.cart_psen_n_o  (cart_rd),
-	.cart_t0_i      (kb_gnd), // kb ack
+	.cart_psen_n_o  (cart_rd_n),
+	.cart_t0_i      (kb_read_ack), // kb ack
 	.cart_t0_o      (),
 	.cart_t0_dir_o  (),
 
@@ -346,11 +357,13 @@ vp_console #(0) vp
 
 ////////////////////////////  SOUND  ////////////////////////////////////
 
-
 wire [3:0] snd;
 
-assign AUDIO_L = {3'b0, snd, 9'b0};
-assign AUDIO_R = {3'b0, snd, 9'b0};
+// Convert to 16 bit audio.
+wire [15:0] audio_out = {2'b00, snd, 10'd0};
+
+assign AUDIO_L = audio_out;
+assign AUDIO_R = audio_out;
 
 
 ////////////////////////////  VIDEO  ////////////////////////////////////
@@ -366,37 +379,19 @@ wire VSync;
 wire HBlank;
 wire VBlank;
 
-wire ce_pix = 1;
+wire ce_pix = clk_vdc;
 
 wire [23:0] colors = color_lut[{R, G, B, luma}];
 
-assign CLK_VIDEO = clk_vdc;
+assign CLK_VIDEO = clk_sys;
 assign VGA_SL = sl[1:0];
 assign VGA_F1 = 0;
 
 
 wire [2:0] scale = status[11:9];
 wire [2:0] sl = scale ? scale - 1'd1 : 3'd0;
-wire       scandoubler =  (scale || forced_scandoubler);
 
-// video_cleaner video_cleaner
-// (
-// 	.*,
-	
-// 	.clk_vid(clk_vga),
-// 	.ce_pix(clk_vdc),
-// 	.R(colors[23:16]),
-// 	.G(colors[15:8]),
-// 	.B(colors[7:0]),
-	
-// 	.HSync(~HSync),
-// 	.VSync(~VSync),
-	
-// 	.HBlank_out(),
-// 	.VBlank_out()
-// );
-
-video_mixer #(.LINE_LENGTH(320)) video_mixer
+video_mixer #(.LINE_LENGTH(392)) video_mixer
 (
 	.*,
 	.HBlank(HBlank),
@@ -406,6 +401,7 @@ video_mixer #(.LINE_LENGTH(320)) video_mixer
 	.clk_sys(CLK_VIDEO),
 	.ce_pix_out(CE_PIXEL),
 
+	.scandoubler(scale || forced_scandoubler),
 	.scanlines(0),
 	.hq2x(scale==1),
 	.mono(0),
@@ -415,64 +411,126 @@ video_mixer #(.LINE_LENGTH(320)) video_mixer
 	.B(colors[7:0])
 );
 
-// always @(posedge clk_vdc) begin
-// 	reg [8:0] old_count_v;
-
-// 	if(pix_ce_n) begin
-// 		if((old_count_v == 511) && (count_v == 0)) begin
-// 			h <= 0;
-// 			v <= 0;
-// 			free_sync <= 0;
-// 		end else begin
-// 			if(h == 340) begin
-// 				h <= 0;
-// 				if(v == 261) begin
-// 					v <= 0;
-// 					if(~&free_sync) free_sync <= free_sync + 1'd1;
-// 				end else begin
-// 					v <= v + 1'd1;
-// 				end
-// 			end else begin
-// 				h <= h + 1'd1;
-// 			end
-// 		end
-
-// 		old_count_v <= count_v;
-// 	end
-
-// 	if(pix_ce) begin
-// 		HBlank <= (hc >= 256);
-// 		VBlank <= (vc >= 240);
-// 		HSync  <= ((hc >= 277) && (hc <  318));
-// 		VSync  <= ((vc >= 245) && (vc <  254));
-// 	end
-// end
 
 ////////////////////////////  INPUT  ////////////////////////////////////
 
-
-// XXX: Add keyboard
-
-// [5]  = B
-// [4]  = A
-// [3]  = UP
-// [2]  = DOWN
-// [1]  = LEFT
-// [0]  = RIGHT
+// [6-15] = Num Keys
+// [5]    = Reset
+// [4]    = Action
+// [3]    = UP
+// [2]    = DOWN
+// [1]    = LEFT
+// [0]    = RIGHT
 
 wire [6:1] kb_dec;
 wire [14:7] kb_enc;
-
-wire kb_clk_o;
-wire kb_do;
-wire [7:0] kb_ascii;
-wire kb_ascii_ack;
 wire kb_read_ack;
-wire kb_released;
-wire kb_gnd;
 
-wire [7:0] kb_data;
+wire [10:0] ps2_key;
+reg [7:0] ps2_ascii;
+reg ps2_changed;
+reg ps2_released;
 
+reg [7:0] joy_ascii;
+reg [9:0] joy_changed;
+reg joy_released;
+
+wire [9:0] joy_numpad = (joya[15:6] | joyb[15:6]);
+
+// If they try hard enough with the gamepad they can get keys stuck until
+// they press them again. This could stand to be improved in the future.
+
+always @(posedge clk_sys) begin
+	reg old_state;
+	reg [9:0] old_joy;
+
+	old_state <= ps2_key[10];
+	old_joy <= joy_numpad;
+	
+	ps2_changed <= (old_state != ps2_key[10]);
+	ps2_released <= ~ps2_key[9];
+	
+	joy_changed <= (joy_numpad ^ old_joy);
+	joy_released <= (joy_numpad ? 1'b0 : 1'b1);
+	
+	if(old_state != ps2_key[10]) begin
+		casex(ps2_key[8:0])
+			'hX16: ps2_ascii <= "1"; // 1
+			'hX1E: ps2_ascii <= "2"; // 2
+			'hX26: ps2_ascii <= "3"; // 3
+			'hX25: ps2_ascii <= "4"; // 4
+			'hX2E: ps2_ascii <= "5"; // 5
+			'hX36: ps2_ascii <= "6"; // 6
+			'hX3D: ps2_ascii <= "7"; // 7
+			'hX3E: ps2_ascii <= "8"; // 8
+			'hX46: ps2_ascii <= "9"; // 9
+			'hX45: ps2_ascii <= "0"; // 0
+			
+			'hX1C: ps2_ascii <= "a"; // a
+			'hX32: ps2_ascii <= "b"; // b
+			'hX21: ps2_ascii <= "c"; // c
+			'hX23: ps2_ascii <= "d"; // d
+			'hX24: ps2_ascii <= "e"; // e
+			'hX2B: ps2_ascii <= "f"; // f
+			'hX34: ps2_ascii <= "g"; // g
+			'hX33: ps2_ascii <= "h"; // h
+			'hX43: ps2_ascii <= "i"; // i
+			'hX3B: ps2_ascii <= "j"; // j
+			'hX42: ps2_ascii <= "k"; // k
+			'hX4B: ps2_ascii <= "l"; // l
+			'hX3A: ps2_ascii <= "m"; // m
+			'hX31: ps2_ascii <= "n"; // n
+			'hX44: ps2_ascii <= "o"; // o
+			'hX4D: ps2_ascii <= "p"; // p
+			'hX15: ps2_ascii <= "q"; // q
+			'hX2D: ps2_ascii <= "r"; // r
+			'hX1B: ps2_ascii <= "s"; // s
+			'hX2C: ps2_ascii <= "t"; // t
+			'hX3C: ps2_ascii <= "u"; // u
+			'hX2A: ps2_ascii <= "v"; // v
+			'hX1D: ps2_ascii <= "w"; // w
+			'hX22: ps2_ascii <= "x"; // x
+			'hX35: ps2_ascii <= "y"; // y
+			'hX1A: ps2_ascii <= "z"; // z
+			'hX29: ps2_ascii <= " "; // space
+			
+			'hX79: ps2_ascii <= "+"; // +
+			'hX7B: ps2_ascii <= "-"; // -
+			'hX7C: ps2_ascii <= "*"; // *
+			'hX4A: ps2_ascii <= "/"; // /
+			'hX55: ps2_ascii <= "="; // /
+			// 'hX1F: ps2_ascii <= 8'h31; // gui l / yes
+			// 'hX27: ps2_ascii <= 8'h31; // gui r / no
+			// 'hX11: ps2_ascii <= 8'h31; // alt / clear
+			'hX5A: ps2_ascii <= 8'd10; // enter
+			'hX66: ps2_ascii <= 8'd8; // backspace
+			default: ps2_ascii <= 8'h00;
+		endcase
+	end else if (joy_numpad) begin
+		if (joy_numpad[0])
+			joy_ascii <= "1";
+		else if (joy_numpad[1])
+			joy_ascii <= "2";
+		else if (joy_numpad[2])
+			joy_ascii <= "3";
+		else if (joy_numpad[3])
+			joy_ascii <= "4";
+		else if (joy_numpad[4])
+			joy_ascii <= "5";
+		else if (joy_numpad[5])
+			joy_ascii <= "6";
+		else if (joy_numpad[6])
+			joy_ascii <= "7";
+		else if (joy_numpad[7])
+			joy_ascii <= "8";
+		else if (joy_numpad[8])
+			joy_ascii <= "9";
+		else if (joy_numpad[9])
+			joy_ascii <= "0";
+		else
+			joy_ascii <= 8'h00;		
+	end
+end
 
 vp_keymap vp_keymap
 (
@@ -481,60 +539,32 @@ vp_keymap vp_keymap
 	.keyb_dec_i(kb_dec),
 	.keyb_enc_o(kb_enc),
 	
-	.rx_data_ready_i(kb_ascii_ack),
-	.rx_ascii_i(kb_ascii),
-	.rx_released_i(kb_released),
+	.rx_data_ready_i(ps2_changed || joy_changed),
+	.rx_ascii_i(ps2_changed ? ps2_ascii : joy_ascii),
+	.rx_released_i(ps2_released && joy_released),
 	.rx_read_o(kb_read_ack)
 );
 
-ps2_keyboard_interface #(
-	.TIMER_60USEC_VALUE_PP(1288), // Num sys_clk for 60usec
-	.TIMER_60USEC_BITS_PP(11),    // Bits needed for timer
-	.TIMER_5USEC_VALUE_PP(107),
-	.TIMER_5USEC_BITS_PP(7)
-) ps2k
-(
-	.clk(clk_sys),
-	.reset(reset),
-	.ps2_clk(kb_clk_o),
-	.ps2_data(kb_do),
-	
-	.rx_extended(),
-	.rx_released(kb_released),
-	.rx_shift_key_on(),
-	.rx_ascii(kb_ascii),
-	.rx_data_ready(kb_ascii_ack),
-
-	.rx_read(kb_read_ack),
-	.tx_data(kb_data),
-	.tx_write(kb_gnd),
-	.tx_write_ack(),
-	.tx_error_no_keyboard_ack()
-);
-
-
-
-
 // Joystick wires are low when pressed
 // Passed as a vector bit 1 = left bit 0 = right
+// There is no definition as to which is player 1
+
 wire [1:0] joy_up     = {~joya[3], ~joyb[3]};
 wire [1:0] joy_down   = {~joya[2], ~joyb[2]};
 wire [1:0] joy_left   = {~joya[1], ~joyb[1]};
 wire [1:0] joy_right  = {~joya[0], ~joyb[0]};
 wire [1:0] joy_action = {~joya[4], ~joyb[4]};
-wire       joy_gnd    = {~joya[5]};
+wire       joy_reset  = ~joya[5] & ~joyb[5];
 
 
 ////////////////////////////  MEMORY  ///////////////////////////////////
 
 
 wire [11:0] cart_addr;
-wire [7:0] cart_di;
 wire [7:0] cart_do;
 wire cart_bank_0;
 wire cart_bank_1;
-wire cart_rd;
-wire cart_gnd;
+wire cart_rd_n;
 reg [15:0] cart_size;
 
 dpram #(14) rom

@@ -31,10 +31,8 @@ use work.i8244_sound_pack.cpu2snd_t;
 package i8244_comp_pack is
 
   component i8244_sync_gen
-    generic (
-      is_pal_g : integer := 1
-    );
     port (
+      is_pal_g      : in  integer;
       clk_i         : in  std_logic;
       clk_en_i      : in  boolean;
       clk_rise_en_o : out boolean;
