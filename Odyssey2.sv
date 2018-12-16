@@ -230,16 +230,13 @@ pll pll
 );
 
 // hold machine in reset until first download starts
-reg init_reset_n = 1;
 reg old_pal = 0;
 
 always @(posedge clk_sys) begin
 	old_pal <= PAL;
-	if(RESET) init_reset_n <= 0;
-	else if(ioctl_download) init_reset_n <= 1;
 end
 
-wire reset = ~init_reset_n | buttons[1] | status[0] | ioctl_download | (old_pal != PAL);
+wire reset = buttons[1] | status[0] | ioctl_download | (old_pal != PAL);
 
 // Original Clocks:
 // Standard    NTSC           PAL
@@ -329,7 +326,7 @@ vp_console vp
 	.l_o            (luma),
 	.hsync_n_o      (HSync),
 	.vsync_n_o      (VSync),
-	.hbl_o          (HBlank),
+	.hbl_o          (),
 	.vbl_o          (VBlank),
 	
 	// Sound
@@ -352,7 +349,7 @@ wire [7:0] cart_di;
 // T0_i high if SP0256 command buffer full
 
 // Convert to 16 bit audio.
-wire [15:0] audio_out = {2'b00, snd, 10'd0};
+wire [15:0] audio_out = {2'b0, snd, 10'd0};
 
 assign AUDIO_L = audio_out;
 assign AUDIO_R = audio_out;
@@ -368,7 +365,6 @@ wire luma;
 
 wire HSync;
 wire VSync;
-wire HBlank;
 wire VBlank;
 
 wire ce_pix = clk_vdc_en;
@@ -383,10 +379,21 @@ assign VGA_F1 = 0;
 wire [2:0] scale = status[11:9];
 wire [2:0] sl = scale ? scale - 1'd1 : 3'd0;
 
-video_mixer #(.LINE_LENGTH(392)) video_mixer
+reg [15:0] ce_h_cnt;
+reg old_h;
+
+wire faux_hblank = ((ce_h_cnt < 47) || (ce_h_cnt >= 367));
+
+always @(posedge ce_pix) begin
+	old_h <= HSync;
+	
+	ce_h_cnt <= (~old_h & HSync) ? 16'd0 : (ce_h_cnt + 16'd1);
+end
+
+video_mixer #(.LINE_LENGTH(455)) video_mixer
 (
 	.*,
-	.HBlank(HBlank),
+	.HBlank(faux_hblank),
 	.VBlank(VBlank),
 	.HSync(~HSync),
 	.VSync(~VSync),
