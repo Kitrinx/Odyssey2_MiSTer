@@ -1,11 +1,4 @@
 // FPGA Videopac
-//
-// $Id: jop_vp.vhd,v 1.11 2007/04/10 21:29:02 arnim Exp $
-// $Name: videopac_rel_1_0 $
-//
-// Toplevel of the Cyclone port for 
-//   https://github.com/wsoltys/mist-cores
-//
 //-----------------------------------------------------------------------------
 //
 // Copyright (c) 2007, Arnim Laeuger (arnim.laeuger@gmx.net)
@@ -146,11 +139,9 @@ assign LED_POWER = 0;
 assign VIDEO_ARX = status[8] ? 8'd16 : 8'd64;
 assign VIDEO_ARY = status[8] ? 8'd9  : 8'd48;
 
-assign {SDRAM_DQ, SDRAM_A, SDRAM_BA, SDRAM_CKE, SDRAM_DQML, SDRAM_DQMH, SDRAM_nWE, SDRAM_nCAS, SDRAM_nRAS, SDRAM_nCS} = 'Z;
+assign {SDRAM_DQ, SDRAM_A, SDRAM_BA, SDRAM_CKE, SDRAM_CLK, SDRAM_DQML, SDRAM_DQMH, SDRAM_nWE, SDRAM_nCAS, SDRAM_nRAS, SDRAM_nCS} = 'Z;
 assign {DDRAM_CLK, DDRAM_BURSTCNT, DDRAM_ADDR, DDRAM_DIN, DDRAM_BE, DDRAM_RD, DDRAM_WE} = 0;
 assign {SD_SCK, SD_MOSI, SD_CS} = 'Z;
-
-assign SDRAM_CLK = CLK_50M;
 
 
 ////////////////////////////  HPS I/O  //////////////////////////////////
@@ -224,26 +215,10 @@ wire [15:0] joyb = joy_swap ? joystick_0 : joystick_1;
 
 
 wire clock_locked;
-
 wire clk_sys_o2;
 wire clk_sys_vp;
-wire clk_vid;
 
-//wire clk_sys = (clk_sys_ctr == div_sys);
-wire clk_cpu = (clk_cpu_ctr == div_cpu);
-wire clk_vdc = (clk_vdc_ctr == div_vdc);
-
-reg [3:0] clk_sys_ctr;
-reg [3:0] clk_cpu_ctr;
-reg [3:0] clk_vdc_ctr;
-
-wire [3:0] div_sys = PAL ? 4'd3 : 4'd5;
-wire [3:0] div_vdc = PAL ? 4'd10 : 4'd6;
-wire [3:0] div_cpu = PAL ? 4'd12 : 4'd8;
-
-
-
-wire clk_sys = (PAL ? clk_sys_vp : clk_sys_o2);
+wire clk_sys = PAL ? clk_sys_vp : clk_sys_o2;
 
 pll pll
 (
@@ -251,13 +226,11 @@ pll pll
 	.rst(0),
 	.outclk_0(clk_sys_o2),
 	.outclk_1(clk_sys_vp),
-	.outclk_2(clk_vid),
-	
 	.locked(clock_locked)
 );
 
 // hold machine in reset until first download starts
-reg init_reset_n = 0;
+reg init_reset_n = 1;
 reg old_pal = 0;
 
 always @(posedge clk_sys) begin
@@ -268,37 +241,46 @@ end
 
 wire reset = ~init_reset_n | buttons[1] | status[0] | ioctl_download | (old_pal != PAL);
 
-// Clocks:
-// Master:     107.375      106.407
-// Standard    NTSC         PAL
-// Sys Div     5            3
-// Main clock  21.477 MHz   35.469 MHz
-// VDC divider 3            5
-// VDC clock   7.159 MHz    7.094 MHz
-// CPU divider 4            6
-// CPU clock   5.369 MHz    5.911 MHz
+// Original Clocks:
+// Standard    NTSC           PAL
+// Sys clock   42.95454       70.9379 
+// Main clock  21.47727 MHz   35.46895 MHz // ntsc/pal colour carrier times 3/4 respectively
+// VDC divider 3              5
+// VDC clock   7.159 MHz      7.094 MHz
+// CPU divider 4              6
+// CPU clock   5.369 MHz      5.911 MHz
 
-// always @(posedge clk_master) begin
-// 	if (clk_sys_ctr >= div_sys)
-// 		clk_sys_ctr <= 4'd1;
-// 	else
-// 		clk_sys_ctr <= clk_sys_ctr + 4'd1;
-// end
+reg clk_cpu_en;
+reg clk_vdc_en;
+
+reg [3:0] clk_cpu_en_ctr;
+reg [3:0] clk_vdc_en_ctr;
+
+// Generate pulse enables for cpu and vdc
 
 always @(posedge clk_sys or posedge reset) begin
 	if (reset) begin
-		clk_cpu_ctr <= 4'd1;
-		clk_vdc_ctr <= 4'd1;
+		clk_cpu_en_ctr <= 4'd0;
+		clk_vdc_en_ctr <= 4'd0;
 	end else begin
-		if (clk_cpu_ctr >= div_cpu)
-			clk_cpu_ctr <= 4'd1;
-		else
-			clk_cpu_ctr <= clk_cpu_ctr + 4'd1;
-			
-		if (clk_vdc_ctr >= div_vdc)
-			clk_vdc_ctr <= 4'd1;
-		else
-			clk_vdc_ctr <= clk_vdc_ctr + 4'd1;
+
+		// CPU Counter
+		if (clk_cpu_en_ctr >= (PAL ? 4'd11 : 4'd7)) begin
+			clk_cpu_en_ctr <= 4'd0;
+			clk_cpu_en <= 1;
+		end else begin
+			clk_cpu_en_ctr <= clk_cpu_en_ctr + 4'd1;
+			clk_cpu_en <= 0;
+		end
+
+		// VDC Counter
+		if (clk_vdc_en_ctr >= (PAL ? 4'd9 : 4'd5)) begin
+			clk_vdc_en_ctr <= 4'd0;
+			clk_vdc_en <= 1;
+		end else begin
+			clk_vdc_en_ctr <= clk_vdc_en_ctr + 4'd1;
+			clk_vdc_en <= 0;
+		end
 	end
 end
 
@@ -311,22 +293,22 @@ vp_console vp
 	// System
 	.is_pal_g       (PAL),
 	.clk_i          (clk_sys),
-	.clk_cpu_en_i   (clk_cpu),
-	.clk_vdc_en_i   (clk_vdc),
+	.clk_cpu_en_i   (clk_cpu_en),
+	.clk_vdc_en_i   (clk_vdc_en),
 	
 	.res_n_i        (~reset & joy_reset), // low to reset
 
 	// Cart Data
 	.cart_cs_o      (),
 	.cart_cs_n_o    (),
-	.cart_wr_n_o    (cart_wr_n),
+	.cart_wr_n_o    (cart_wr_n),   // Cart write
 	.cart_a_o       (cart_addr),   // Cart Address
 	.cart_d_i       (~cart_rd_n ? cart_do : 8'hFF), // Cart Data
-	.cart_d_o       (cart_di),            // Cart data out
+	.cart_d_o       (cart_di),     // Cart data out
 	.cart_bs0_o     (cart_bank_0), // Bank switch 0
 	.cart_bs1_o     (cart_bank_1), // Bank Switch 1
 	.cart_psen_n_o  (cart_rd_n),   // Program Store Enable (read)
-	.cart_t0_i      (kb_read_ack), // kb ack
+	.cart_t0_i      (kb_read_ack), // KB/Voice ack
 	.cart_t0_o      (),
 	.cart_t0_dir_o  (),
 
@@ -362,12 +344,12 @@ wire [3:0] snd;
 wire cart_wr_n;
 wire [7:0] cart_di;
 
-// Address bit 10 =  ROM
+// The Voice info:
 // $80 to $FF voice writes
 // Voice bank select:
 // $E4 internal voice rom bank
 // $E8, $E9, and $EA external rom banks
-// T0_i high if SP buffer full
+// T0_i high if SP0256 command buffer full
 
 // Convert to 16 bit audio.
 wire [15:0] audio_out = {2'b00, snd, 10'd0};
@@ -389,7 +371,7 @@ wire VSync;
 wire HBlank;
 wire VBlank;
 
-wire ce_pix = clk_vdc;
+wire ce_pix = clk_vdc_en;
 
 wire [23:0] colors = color_lut[{R, G, B, luma}];
 
@@ -447,8 +429,8 @@ reg joy_released;
 
 wire [9:0] joy_numpad = (joya[15:6] | joyb[15:6]);
 
-// If they try hard enough with the gamepad they can get keys stuck until
-// they press them again. This could stand to be improved in the future.
+// If the user tries hard enough with the gamepad they can get keys stuck 
+// until they press them again. This could stand to be improved in the future.
 
 always @(posedge clk_sys) begin
 	reg old_state;
