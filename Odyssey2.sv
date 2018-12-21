@@ -136,8 +136,8 @@ assign LED_USER  = ioctl_download;
 assign LED_DISK  = 0;
 assign LED_POWER = 0;
 
-assign VIDEO_ARX = status[8] ? 8'd16 : 8'd64;
-assign VIDEO_ARY = status[8] ? 8'd9  : 8'd48;
+assign VIDEO_ARX = status[8] ? 8'd16 : 8'd4;
+assign VIDEO_ARY = status[8] ? 8'd9  : 8'd3;
 
 assign {SDRAM_DQ, SDRAM_A, SDRAM_BA, SDRAM_CKE, SDRAM_CLK, SDRAM_DQML, SDRAM_DQMH, SDRAM_nWE, SDRAM_nCAS, SDRAM_nRAS, SDRAM_nCS} = 'Z;
 assign {DDRAM_CLK, DDRAM_BURSTCNT, DDRAM_ADDR, DDRAM_DIN, DDRAM_BE, DDRAM_RD, DDRAM_WE} = 0;
@@ -157,6 +157,7 @@ parameter CONF_STR = {
 	"O8,Aspect ratio,4:3,16:9;",
 	"O9B,Scandoubler Fx,None,HQ2x,CRT 25%,CRT 50%,CRT 75%;",
 	"OGH,Buffering,Triple,Single,Low Latency;",
+	"O5,Trim Overscan,No,Yes;",
 	"-;",
 	"O7,Swap Joysticks,No,Yes;",
 	"-;",
@@ -326,7 +327,7 @@ vp_console vp
 	.l_o            (luma),
 	.hsync_n_o      (HSync),
 	.vsync_n_o      (VSync),
-	.hbl_o          (),
+	.hbl_o          (HBlank),
 	.vbl_o          (VBlank),
 	
 	// Sound
@@ -348,7 +349,6 @@ wire [7:0] cart_di;
 // $E8, $E9, and $EA external rom banks
 // T0_i high if SP0256 command buffer full
 
-// Convert to 16 bit audio.
 wire [15:0] audio_out = {2'b0, snd, 10'd0};
 
 assign AUDIO_L = audio_out;
@@ -366,6 +366,7 @@ wire luma;
 wire HSync;
 wire VSync;
 wire VBlank;
+wire HBlank;
 
 wire ce_pix = clk_vdc_en;
 
@@ -382,18 +383,15 @@ wire [2:0] sl = scale ? scale - 1'd1 : 3'd0;
 reg [15:0] ce_h_cnt;
 reg old_h;
 
-wire faux_hblank = ((ce_h_cnt < 47) || (ce_h_cnt >= 367));
-
 always @(posedge ce_pix) begin
 	old_h <= HSync;
-	
 	ce_h_cnt <= (~old_h & HSync) ? 16'd0 : (ce_h_cnt + 16'd1);
 end
 
 video_mixer #(.LINE_LENGTH(455)) video_mixer
 (
 	.*,
-	.HBlank(faux_hblank),
+	.HBlank(status[5] ? ((ce_h_cnt <= 46) || (ce_h_cnt >= 367)) : HBlank),
 	.VBlank(VBlank),
 	.HSync(~HSync),
 	.VSync(~VSync),
@@ -603,4 +601,3 @@ wire [23:0] color_lut[16] = '{
 };
 
 endmodule
-

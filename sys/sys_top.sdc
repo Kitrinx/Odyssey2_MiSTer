@@ -11,6 +11,8 @@ create_generated_clock -source [get_pins -compatibility_mode {pll_hdmi|pll_hdmi_
                        -name HDMI_CLK [get_ports HDMI_TX_CLK]
 
 create_clock -name CLK_SYS -period 10.000 [get_nets {emu|clk_sys}]
+create_clock -name CLK_CPU -period 10.000 [get_nets {emu|clk_cpu_en}]
+create_clock -name CLK_VDC -period 10.000 [get_nets {emu|clk_vdc_en}]
 
 derive_clock_uncertainty
 

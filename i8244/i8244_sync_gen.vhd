@@ -96,7 +96,7 @@ architecture rtl of i8244_sync_gen is
   -- and ends 5 us before end of hblank
   constant last_hor_int_c    : pos_t := last_hblank_c - to_pos_f(37);
 
-  constant last_vis_line_c   : pos_t := to_pos_f(239);
+  constant last_vis_line_c   : pos_t := to_pos_f(240);
   constant last_frame_line_c : limits_t := (
     is_ntsc_c => to_pos_f(261),
     is_pal_c  => to_pos_f(311));
