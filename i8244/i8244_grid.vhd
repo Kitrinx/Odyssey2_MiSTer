@@ -120,7 +120,9 @@ begin
              lower_v,
              left_v,
              right_v,
-             dot_v    : natural;
+             dot_v,    
+             left_v10,
+             dot_v10 : natural;
   begin
     if res_i then
       hgrid_q <= '0';
@@ -164,6 +166,14 @@ begin
                 end if;
               end if;
             end loop;
+            
+            -- Show dot column n.10                       --avlixa
+            left_v10  := grid_hoffset_c + 9 * grid_hspace_c;
+            dot_v10   := left_v10 + grid_hwidth_c;
+            if hpos_v >= left_v10 and hpos_v < dot_v10 then
+               dgrid_q <= '1';
+            end if;
+           
           end if;
         end loop;
 
@@ -185,7 +195,7 @@ begin
               lower_v := upper_v + grid_vspace_c;
 
               -- check upper and lower bar limits
-              if vpos_v >= upper_v and vpos_v < lower_v then
+              if vpos_v >=upper_v and vpos_v < lower_v then 
                 if grid_cfg_i.bars.vbars(vbar)(idx) = '1' then
                   vgrid_q <= '1';
                 end if;

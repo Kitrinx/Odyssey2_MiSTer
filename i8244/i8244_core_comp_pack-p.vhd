@@ -15,14 +15,14 @@ use ieee.std_logic_1164.all;
 
 package i8244_core_comp_pack is
 
-  component i8244_charset_rom
-    port (
-      clk_i      : in  std_logic;
-      rom_addr_i : in  std_logic_vector(8 downto 0);
-      rom_en_i   : in  std_logic;
-      rom_data_o : out std_logic_vector(7 downto 0)
-    );
-  end component;
+--  component i8244_charset_rom
+--    port (
+--      clk_i      : in  std_logic;
+--      rom_addr_i : in  std_logic_vector(8 downto 0);
+--      rom_en_i   : in  std_logic;
+--      rom_data_o : out std_logic_vector(7 downto 0)
+--    );
+--  end component;
 
   component i8244_core
     port (
@@ -32,9 +32,9 @@ package i8244_core_comp_pack is
       clk_en_i   : in  std_logic;
       res_n_i    : in  std_logic;
       -- ROM Interface --------------------------------------------------------
-      rom_addr_o : out std_logic_vector(8 downto 0);
-      rom_en_o   : out std_logic;
-      rom_data_i : in  std_logic_vector(7 downto 0);
+      char_a_o : out std_logic_vector(8 downto 0);
+      char_d_i : in  std_logic_vector(7 downto 0);
+		char_en  : out std_logic;
       -- I8244 Pads Interface -------------------------------------------------
       intr_n_o   : out std_logic;
       stb_i      : in  std_logic;
@@ -92,7 +92,10 @@ package i8244_core_comp_pack is
       b_o        : out std_logic;
       ale_i      : in  std_logic;
       snd_o      : out std_logic;
-      snd_vec_o  : out std_logic_vector(3 downto 0)
+      snd_vec_o  : out std_logic_vector(3 downto 0);
+		char_a_o   : out std_logic_vector(8 downto 0);
+      char_d_i   : in  std_logic_vector(7 downto 0);
+		char_en    : out std_logic
     );
   end component;
 

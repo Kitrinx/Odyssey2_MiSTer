@@ -78,20 +78,23 @@ entity i8244_top_sync is
     b_o        : out std_logic;
     ale_i      : in  std_logic;
     snd_o      : out std_logic;
-    snd_vec_o  : out std_logic_vector(3 downto 0)
+    snd_vec_o  : out std_logic_vector(3 downto 0);
+	 char_a_o   : out std_logic_vector(8 downto 0);
+	 char_d_i   : in  std_logic_vector(7 downto 0);
+	 char_en    : out std_logic
   );
 
 end i8244_top_sync;
 
 
 use work.i8244_core_comp_pack.i8244_core;
-use work.i8244_core_comp_pack.i8244_charset_rom;
+--use work.i8244_core_comp_pack.i8244_charset_rom;
 
 architecture struct of i8244_top_sync is
 
-  signal rom_addr_s : std_logic_vector(8 downto 0);
-  signal rom_en_s   : std_logic;
-  signal rom_data_s : std_logic_vector(7 downto 0);
+--  signal char_a_s : std_logic_vector(8 downto 0);
+--  signal char_en_s   : std_logic;
+--  signal char_d_s : std_logic_vector(7 downto 0);
 
 begin
 
@@ -105,9 +108,9 @@ begin
       clk_i      => clk_i,
       clk_en_i   => clk_en_i,
       res_n_i    => res_n_i,
-      rom_addr_o => rom_addr_s,
-      rom_en_o   => rom_en_s,
-      rom_data_i => rom_data_s,
+      char_a_o => char_a_o,
+      char_d_i => char_d_i,
+		char_en  => char_en,
       intr_n_o   => intr_n_o,
       stb_i      => stb_i,
       bg_o       => bg_o,
@@ -134,15 +137,15 @@ begin
     );
 
 
-  -----------------------------------------------------------------------------
-  -- Character set ROM
-  -----------------------------------------------------------------------------
-  charset_rom_b : i8244_charset_rom
-    port map (
-      clk_i      => clk_i,
-      rom_addr_i => rom_addr_s,
-      rom_en_i   => rom_en_s,
-      rom_data_o => rom_data_s
-    );
+--  -----------------------------------------------------------------------------
+--  -- Character set ROM
+--  -----------------------------------------------------------------------------
+--  charset_rom_b : i8244_charset_rom
+--    port map (
+--      clk_i      => clk_i,
+--      rom_addr_i => rom_addr_s,
+--      rom_en_i   => rom_en_s,
+--      rom_data_o => rom_data_s
+--    );
 
 end struct;

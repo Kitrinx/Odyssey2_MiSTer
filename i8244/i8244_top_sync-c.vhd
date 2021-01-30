@@ -14,9 +14,9 @@ configuration i8244_top_sync_struct_c0 of i8244_top_sync is
       use configuration work.i8244_core_struct_c0;
     end for;
 
-    for charset_rom_b: i8244_charset_rom
-      use configuration work.i8244_charset_rom_rtl_c0;
-    end for;
+ --   for charset_rom_b: i8244_charset_rom
+ --     use configuration work.i8244_charset_rom_rtl_c0;
+ --   end for;
 
   end for;
 

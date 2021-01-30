@@ -43,7 +43,6 @@
 -- you have the latest version of this file.
 --
 -------------------------------------------------------------------------------
-
 library ieee;
 use ieee.std_logic_1164.all;
 
@@ -78,15 +77,12 @@ architecture rtl of i8244_sound is
   constant pre_0k9_max_c : unsigned(3 downto 0) := to_unsigned(15, 4);
   signal   prescaler_q   : unsigned(3 downto 0);
 
-  constant shift_cnt_max_c : unsigned(4 downto 0) := to_unsigned(23, 5);
-  signal   shift_cnt_q     : unsigned(4 downto 0);
+  constant shift_cnt_max_c : unsigned(7 downto 0) := to_unsigned(255, 8);
+  signal   shift_cnt_q     : unsigned(7 downto 0);
 
   signal noise_lfsr_q : std_logic_vector(15 downto 0);
 
   signal int_q : boolean;
-
-  signal chop_cnt_q : unsigned(3 downto 0);
-  signal chop_q     : std_logic;
 
 begin
 
@@ -105,8 +101,7 @@ begin
       shift_cnt_q <= shift_cnt_max_c;
       int_q       <= false;
       prescaler_q <= pre_3k9_max_c;
-      chop_cnt_q  <= (others => '0');
-      chop_q      <= '0';
+
       -- set LSB of noise LFSR
       noise_lfsr_q    <= (others => '0');
       noise_lfsr_q(0) <= '1';
@@ -150,8 +145,7 @@ begin
             int_q <= true;
           else
             shift_cnt_q <= shift_cnt_q - 1;
-            snd_q(22 downto 0) <= snd_q(23 downto 1);
-            snd_q(23) <= snd_q(0);
+            snd_q(23 downto 0) <= snd_q(0) & snd_q(23 downto 1);
           end if;
 
           -- and update noise LFSR register by shifting it up
@@ -161,18 +155,7 @@ begin
           noise_lfsr_q(0) <= noise_lfsr_q(15) xor noise_lfsr_q(13) xor
                              noise_lfsr_q(0);
         end if;
-
-        -- chopper
-        if chop_cnt_q = unsigned(cpu2snd_i.volume) then
-          chop_q <= '1';
-        end if;
-        if chop_cnt_q = 0 then
-          chop_cnt_q <= (others => '1');
-          chop_q     <= '0';
-        else
-          chop_cnt_q <= chop_cnt_q - 1;
-        end if;
-
+        
       end if;
 
       -- parallel load from CPU interface
@@ -190,21 +173,21 @@ begin
   end process seq;
   --
   -----------------------------------------------------------------------------
-
-
+  
   -- overlay noise bit on shift register output
   snd_s <=   snd_q(0) xor noise_lfsr_q(15)
-           when cpu2snd_i.noise else
-             snd_q(0);
-
-
+                when cpu2snd_i.noise else snd_q(0);
+  			  
   -----------------------------------------------------------------------------
   -- Output mapping
   -----------------------------------------------------------------------------
   snd_int_o <= int_q;
-  snd_o     <= snd_s and chop_q;
-  snd_vec_o <=   cpu2snd_i.volume
-               when snd_s = '1' and cpu2snd_i.enable else
-                 (others => '0');
+  
+  snd_o <=   snd_s when cpu2snd_i.enable
+                 else '0';
+                  
+  snd_vec_o <=   cpu2snd_i.volume when  snd_s = '1' and cpu2snd_i.enable 
+                 else
+                  (others => '0');
 
 end rtl;

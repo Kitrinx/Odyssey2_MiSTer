@@ -38,6 +38,7 @@
 // Based off MiST port by wsoltys in 2014.
 //
 // Adapted for MiSTer by Kitrinx in 2018
+// Bug fixes and new features added by The spanish videopac team in 2021
 
 module emu
 (
@@ -151,11 +152,17 @@ assign {SD_SCK, SD_MOSI, SD_CS} = 'Z;
 parameter CONF_STR = {
 	"ODYSSEY2;;",
 	"-;",
-	"F,BIN;",
+	"F1,BIN,Load catridge;",
+	"F2,ROM,Load XROM;",
+   "-;",
+	"F3,CHR,Change VDC font;",
 	"-;",
 	"OE,System,Odyssey2,Videopac;",
+	"O6,Palette,Tv (RF),RGB;",
+	"O4,TV Set,Color,B/W;",
 	"O8,Aspect ratio,4:3,16:9;",
 	"O9B,Scandoubler Fx,None,HQ2x,CRT 25%,CRT 50%,CRT 75%;",
+	"O1,The Voice,Off,on;",
 	"OGH,Buffering,Triple,Single,Low Latency;",
 	"O5,Trim Overscan,No,Yes;",
 	"-;",
@@ -175,6 +182,8 @@ wire [24:0] ioctl_addr;
 wire [15:0] ioctl_dout;
 wire        ioctl_wait;
 wire        ioctl_wr;
+wire  [7:0] ioctl_index;
+
 
 wire [15:0] joystick_0,joystick_1;
 wire [24:0] ps2_mouse;
@@ -191,6 +200,7 @@ hps_io #(.STRLEN($size(CONF_STR)>>3)) hps_io
 	.ioctl_addr(ioctl_addr),
 	.ioctl_dout(ioctl_dout),
 	.ioctl_wait(ioctl_wait),
+	.ioctl_index(ioctl_index),
 
 	.forced_scandoubler(forced_scandoubler),
 	
@@ -208,6 +218,10 @@ assign BUFFERMODE = (status[17:16] == 2'b00) ? 2'b01 : (status[17:16] == 2'b01) 
 wire       PAL = status[14];
 wire       joy_swap = status[7];
 
+wire       VOICE = status[1];
+wire       MODE = status[6];
+wire       SCREEN = status[4];
+
 wire [15:0] joya = joy_swap ? joystick_1 : joystick_0;
 wire [15:0] joyb = joy_swap ? joystick_0 : joystick_1;
 
@@ -218,7 +232,7 @@ wire [15:0] joyb = joy_swap ? joystick_0 : joystick_1;
 wire clock_locked;
 wire clk_sys_o2;
 wire clk_sys_vp;
-
+wire clk_2m5;
 wire clk_sys = PAL ? clk_sys_vp : clk_sys_o2;
 
 pll pll
@@ -227,6 +241,7 @@ pll pll
 	.rst(0),
 	.outclk_0(clk_sys_o2),
 	.outclk_1(clk_sys_vp),
+	.outclk_2(clk_2m5),
 	.locked(clock_locked)
 );
 
@@ -297,18 +312,23 @@ vp_console vp
 	.res_n_i        (~reset & joy_reset), // low to reset
 
 	// Cart Data
-	.cart_cs_o      (),
-	.cart_cs_n_o    (),
+	.cart_cs_o      (cart_cs),
+	.cart_cs_n_o    (cart_cs_n),
 	.cart_wr_n_o    (cart_wr_n),   // Cart write
 	.cart_a_o       (cart_addr),   // Cart Address
-	.cart_d_i       (~cart_rd_n ? cart_do : 8'hFF), // Cart Data
+	.cart_d_i       (cart_do), // Cart Data
 	.cart_d_o       (cart_di),     // Cart data out
 	.cart_bs0_o     (cart_bank_0), // Bank switch 0
 	.cart_bs1_o     (cart_bank_1), // Bank Switch 1
 	.cart_psen_n_o  (cart_rd_n),   // Program Store Enable (read)
-	.cart_t0_i      (kb_read_ack), // KB/Voice ack
+	.cart_t0_i      (kb_read_ack || !ldq), // KB/Voice ack
 	.cart_t0_o      (),
 	.cart_t0_dir_o  (),
+	// Char Rom data
+	.char_d_i       (char_do), // Char Data
+	.char_a_o       (char_addr),
+	.char_en        (char_en),
+
 
 	// Input
 	.joy_up_n_i     (joy_up), //-- idx = 0 : left joystick -- idx = 1 : right joystick
@@ -331,11 +351,73 @@ vp_console vp
 	.vbl_o          (VBlank),
 	
 	// Sound
-	.snd_o          (),
+	.snd_o          (snd_o),
 	.snd_vec_o      (snd)
 );
 
+////////////////////////////////////////////////////////////////////////
+rom  rom
+(
+	.clock(clk_sys),
+	.address((ioctl_download && ioctl_index < 3)? ioctl_addr[13:0] : rom_addr),
+	.data(ioctl_dout),
+	.wren(ioctl_wr&& ioctl_index <3),
+	.rden(XROM ? rom_oe_n : ~cart_rd_n),
+	.q(cart_do)
+);
 
+char_rom  char_rom
+(
+	.clock(clk_sys),
+	.address((ioctl_download && ioctl_index == 3) ? ioctl_addr[8:0] : char_addr),
+	.data(ioctl_dout),
+	.wren(ioctl_wr && ioctl_index == 3),
+	.rden(char_en),
+	.q(char_do)
+);
+
+wire [11:0] cart_addr;
+wire [7:0]  cart_do;
+wire [11:0] char_addr;
+wire [7:0]  char_do;
+wire char_en;
+wire cart_bank_0;
+wire cart_bank_1;
+wire cart_rd_n;
+reg [15:0]  cart_size;
+wire XROM;
+wire rom_oe_n = ~(cart_cs_n & cart_bank_0) & cart_rd_n ;
+wire [13:0] rom_addr;
+
+reg old_download = 0;
+
+
+always @(posedge clk_sys) begin
+	old_download <= ioctl_download;
+	
+	if (~old_download & ioctl_download)
+	begin
+		cart_size <= 16'd0;
+		XROM <= (ioctl_index == 2);
+	end
+	else if (ioctl_download & ioctl_wr)
+		cart_size <= cart_size + 16'd1;
+end
+
+
+always @(*)
+  begin
+   if (XROM == 1'b1)
+	   rom_addr <= {2'b0, cart_addr[11:0]};
+	else	    
+    case (cart_size)
+      16'h1000 : rom_addr <= {1'b0,cart_bank_0, cart_addr[11], cart_addr[9:0]};  //4k
+      16'h2000 : rom_addr <= {cart_bank_1,cart_bank_0, cart_addr[11], cart_addr[9:0]};   //8K
+      16'h4000 : rom_addr <= {cart_bank_1,cart_bank_0, cart_addr[11:0]}; //12K (16k banked)
+      default  : rom_addr <= {1'b0, cart_addr[11], cart_addr[9:0]};
+    endcase
+  end
+  
 ////////////////////////////  SOUND  ////////////////////////////////////
 
 wire [3:0] snd;
@@ -349,10 +431,11 @@ wire [7:0] cart_di;
 // $E8, $E9, and $EA external rom banks
 // T0_i high if SP0256 command buffer full
 
-wire [15:0] audio_out = {2'b0, snd, 10'd0};
+
+wire [15:0] audio_out = (VOICE?{snd,snd,snd,snd} | {voice_out[7:0],voice_out[7:0]}:{snd, snd, snd,snd}) ;
 
 assign AUDIO_L = audio_out;
-assign AUDIO_R = audio_out;
+assign AUDIO_R = AUDIO_L;
 
 
 ////////////////////////////  VIDEO  ////////////////////////////////////
@@ -370,7 +453,7 @@ wire HBlank;
 
 wire ce_pix = clk_vdc_en;
 
-wire [23:0] colors = color_lut[{R, G, B, luma}];
+wire [23:0] colors = MODE ? color_lut_pal[{R, G, B, luma}] : color_lut_ntsc[{R, G, B, luma}];
 
 assign CLK_VIDEO = clk_sys;
 assign VGA_SL = sl[1:0];
@@ -388,6 +471,17 @@ always @(posedge ce_pix) begin
 	ce_h_cnt <= (~old_h & HSync) ? 16'd0 : (ce_h_cnt + 16'd1);
 end
 
+
+wire [9:0] grayscale;
+vga_to_greyscale vga_to_greyscale
+(
+  .r_in  ({colors[23:18],colors[23:20]}),
+  .g_in  ({colors[15:10],colors[15:12]}),
+  .b_in  ({colors[7:2],colors[7:4]}),
+  .y_out (grayscale) 
+);
+
+
 video_mixer #(.LINE_LENGTH(455)) video_mixer
 (
 	.*,
@@ -403,9 +497,10 @@ video_mixer #(.LINE_LENGTH(455)) video_mixer
 	.hq2x(scale==1),
 	.mono(0),
 
-	.R(colors[23:16]),
-	.G(colors[15:8]),
-	.B(colors[7:0])
+	.R(SCREEN ? grayscale[9:2] : colors[23:16]),
+	.G(SCREEN ? grayscale[9:2] : colors[15:8] ),
+	.B(SCREEN ? grayscale[9:2] : colors[7:0]  ),
+
 );
 
 
@@ -553,51 +648,87 @@ wire [1:0] joy_action = {~joya[4], ~joyb[4]};
 wire       joy_reset  = ~joya[5] & ~joyb[5];
 
 
-////////////////////////////  MEMORY  ///////////////////////////////////
+
+////////////The Voice /////////////////////////////////////////////////
 
 
-wire [11:0] cart_addr;
-wire [7:0] cart_do;
-wire cart_bank_0;
-wire cart_bank_1;
-wire cart_rd_n;
-reg [15:0] cart_size;
+reg signed [9:0] signed_voice_out;
+reg        [8:0] voice_out;
+    
+wire ldq;
+         
 
-dpram #(14) rom
-(
-	.clock(clk_sys),
-	.address_a(ioctl_download ? ioctl_addr[13:0] : rom_addr),
-	.data_a(ioctl_dout),
-	.wren_a(ioctl_wr),
-	.q_a(cart_do)
+sp0256 sp0256 (
+        .clk_2m5    (clk_2m5),
+        .reset      (rst_a_n),
+        .lrq        (ldq),
+        .data_in    (rom_addr[6:0]),
+        .ald        (ald),
+        .audio_out  (signed_voice_out),
 );
 
-reg old_download = 0;
+compressor compressor
+(
+        .clk  (clk_sys),
+        .din  ( signed_voice_out),
+        .dout ( voice_out)
+);
 
-always @(posedge clk_sys) begin
-	old_download <= ioctl_download;
-	
-	if (~old_download & ioctl_download)
-		cart_size <= 16'd0;
-	else if (ioctl_download & ioctl_wr)
-		cart_size <= cart_size + 16'd1;
-end
+wire ald     = !rom_addr[7] | cart_wr_n | cart_cs;
+wire rst_a_n;
 
-wire [12:0] rom_addr = 
-	{(cart_size >= 16'h2000) ? cart_bank_1 : 1'b0, (cart_size >= 16'h1000) ? 
-	cart_bank_0 : 1'b0, cart_addr[11], cart_addr[9:0]};
 
+
+ls74 ls74
+(
+  .d     (cart_di[5]),
+  .clr   (VOICE? 1'b1: 1'b0),
+  .q     (rst_a_n),
+  .pre   (1'b1),
+  .clk   (ald)
+);
+
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////	
 
 // LUT using calibrated palette
-wire [23:0] color_lut[16] = '{
-	24'h000000, 24'h676767,
-	24'h1a37be, 24'h5c80f6,
-	24'h006d07, 24'h56c469,
-	24'h2aaabe, 24'h77e6eb,
-	24'h790000, 24'hc75151,
-	24'h94309f, 24'hdc84e8,
-	24'h77670b, 24'hc6b86a,
-	24'hcecece, 24'hffffff
+wire [23:0] color_lut_ntsc[16] = '{
+	24'h000000,    //BLACK
+	24'h676767,    //BLACK LUMA
+	24'h1a37be,
+	24'h5c80f6,
+	24'h006d07,
+	24'h56c469,
+	24'h2aaabe,
+	24'h77e6eb,
+	24'h790000,    //RED
+	24'hc75151,    //RED LUMA
+	24'h94309f,
+	24'hdc84e8,
+	24'h77670b,
+	24'hc6b86a,
+	24'hcecece,     //WHITE 
+	24'hffffff      //WHITE LUMA
 };
+
+wire [23:0] color_lut_pal[16] = '{
+	24'h000000,    //BLACK
+	24'h494949,    //BLACK LUMA
+	24'h0000B6,    //Blue
+	24'h4949ff,
+	24'h00B601,    //Green
+	24'h49ff49,
+	24'h00b6c9,    //Cyan
+	24'h49ffff,
+	24'hB60000,    //RED
+	24'hff4949,    //RED LUMA
+	24'hb600b6,    //magenta     
+	24'hff49ff,
+	24'hb6b600,    //Yellow    
+	24'hffff49,
+	24'hb6b6b6,     //WHITE 
+	24'hffffff      //WHITE LUMA
+};
+
 
 endmodule
