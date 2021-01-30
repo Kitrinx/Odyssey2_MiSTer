@@ -46,6 +46,7 @@
 
 library ieee;
 use ieee.std_logic_1164.all;
+use ieee.numeric_std.all; --avlixa
 
 use work.i8244_pack.pos_t;
 use work.i8244_pack.byte_t;
@@ -228,6 +229,13 @@ architecture rtl of i8244_cpuio is
   signal ale_pulse_s,
          rd_pulse_s,
          wr_pulse_s   : boolean;
+			
+  signal spr0_col_s,
+         spr1_col_s,
+			spr2_col_s,
+			spr3_col_s   : std_logic;
+  signal hgrid_s,
+         vgrid_s      : std_logic;
 
 begin
 
@@ -283,32 +291,47 @@ begin
   seq: process (clk_i, res_i)
     variable pix_vec_v     : byte_t;
 
-    function tag_overlap_f(pix  : in std_logic_vector;
-                           mask : in std_logic_vector;
+    function tag_overlap_f(pix  : in std_logic_vector(7 downto 0);
+                           mask : in std_logic_vector(7 downto 0);
                            idx  : in natural) return boolean is
-      variable pix_or_v, mask_or_v   : std_logic;
       variable pix_res_v, mask_res_v : boolean;
+      variable pix_check, pix_mask: std_logic_vector(7 downto 0);
+      variable idx_mask, idx_mask_n: std_logic_vector(7 downto 0);
+      variable init_mask: std_logic_vector(7 downto 0);
     begin
-      pix_or_v  := '0';
-      mask_or_v := '0';
+      -- reestructuración logica de colision by avlixa - 2020
+      init_mask := X"01";
+      -- mascara para eliminar el propio pixel probado
+      idx_mask := std_logic_vector(shift_left(unsigned(init_mask), idx));
+      -- mascara para mantener todo excepto el propio pixel probado
+      idx_mask_n := not idx_mask;
+      -- identificar si el pixel testeado está activo
+      pix_mask := pix and idx_mask;
+      -- pix_res_v == true si el propio pixel a verificar (idx) está a 1
+      pix_res_v := (pix_mask(0) = '1' or pix_mask(1) = '1' or pix_mask(2) = '1' or pix_mask(3) = '1' or 
+                      pix_mask(4) = '1' or pix_mask(5) = '1' or pix_mask(6) = '1' or pix_mask(7) = '1');
+                
+      -- Solo verificar los pixeles que tengan la máscara activa, excepto el que estamos verificando
+      pix_check := ((pix(7 downto 6) and mask(7 downto 6)) & 
+                    ( pix(5) and mask(5)) &
+                    ( pix(4) and mask(4)) &
+                    (pix(3 downto 0) and mask(3 downto 0))) and idx_mask_n; 
 
-      for pos in pix'range loop
-        -- OR all pix / masked pix except for the given index
-        if pos /= idx then
-          pix_or_v  := pix_or_v or pix(pos);
-          mask_or_v := mask_or_v or (pix(pos) and mask(pos));
-        end if;
-      end loop;
-
-      -- 1) overlap bit for idx has to be set when
-      --    this channel overlaps with other enabled pix channels
-      pix_res_v  := pix(idx) = '1' and mask_or_v = '1';
-      -- 2) overlap bit for idx has to be set when
-      --    mask enables this bit and other pix channels collide
-      mask_res_v := (pix(idx) and mask(idx)) = '1' and
-                    pix_or_v = '1';
-
-      return pix_res_v or mask_res_v;
+      -- La colisión se verifica desde el punto de vista de cada pixel que equivale a 
+      -- un tipo de objeto (major, vertical grid, horizontal grid, minor 0-1-2-3, y externo)
+      -- si el pixel a verificar está activo (pix_chek) y alguno de los otros después
+      -- de aplicar la máscara también lo están, entonces se marca colisión en ese pixel/objeto
+      -- Ejemplo:
+      --        pixel: 10000011
+      --      mascara: 00010001
+      -- Al verificar el idx 7 encuentra 1 objetos (idx=0) con máscara y pixel activos y por tanto 
+      -- marca el idx como colision
+      -- Tras aplicar a los 8 bits el resultado sería: 10000010
+      mask_res_v := ( pix_check(0) = '1' or pix_check(1) = '1' or pix_check(2) = '1' 
+                      or pix_check(3) = '1' or pix_check(4) = '1' or pix_check(5) = '1' 
+                      or pix_check(6) = '1' or pix_check(7) = '1');
+      
+      return  mask_res_v and pix_res_v;
     end;
 
   begin
@@ -490,23 +513,60 @@ begin
           reg_x_q <= std_logic_vector(hpos_i(pos_t'high downto 1));
         end if;
       end if;
-
+      
+		spr0_col_s <= minor_pix_i(0);
+		spr1_col_s <= minor_pix_i(1);
+		spr2_col_s <= minor_pix_i(2);
+		spr3_col_s <= minor_pix_i(3);
+		hgrid_s <= grid_hpix_i or grid_dpix_i;
+		--vgrid_s <=  grid_vpix_i and not major_pix_i; --avlixa original
+		vgrid_s <=  grid_vpix_i; --solucionar problema con canasta
+                               -- genera otros errores en: frogger, globos..
+      
+		pix_vec_v := major_pix_i 
+						 & cx_i 
+						 & hgrid_s 
+						 & vgrid_s 
+						 & spr3_col_s 
+						 & spr2_col_s
+						 & spr1_col_s
+						 & spr0_col_s;
+						 
       -- detect overlap -------------------------------------------------------
-      pix_vec_v := (bit_over_major_c  => major_pix_i,
-                    bit_over_ext_c    => cx_i,
-                    bit_over_hdgrid_c => grid_hpix_i or grid_dpix_i,
-                    bit_over_vgrid_c  => grid_vpix_i,
-                    bit_over_minor3_c => minor_pix_i(3),
-                    bit_over_minor2_c => minor_pix_i(2),
-                    bit_over_minor1_c => minor_pix_i(1),
-                    bit_over_minor0_c => minor_pix_i(0));
+--      pix_vec_v := (bit_over_major_c  => major_pix_i,
+--													  
+--                    bit_over_ext_c    => cx_i,
+--                    bit_over_hdgrid_c => hgrid_s,
+--                    bit_over_vgrid_c  => vgrid_s,
+--                    bit_over_minor3_c => spr3_col_s,
+--                    bit_over_minor2_c => spr2_col_s,
+--                    bit_over_minor1_c => spr1_col_s,
+--                    bit_over_minor0_c => spr0_col_s);
       if clk_rise_en_i or clk_fall_en_i then
         for idx in byte_t'range loop
           if tag_overlap_f(pix  => pix_vec_v,
-                           mask => reg_enoverlap_q,
+                           mask => (reg_enoverlap_q),
                            idx  => idx) then
-            reg_overlap_q(idx) <= '1';
+            reg_overlap_q(idx) <= '1' ;
+				
           end if;
+			 
+	
+			 
+--			 ---------------------------------------------------------------
+--			 -- RAMPA trying to get the same values as in the real hardware
+--			 ---------------------------------------------------------------
+--			 if ((reg_overlap_q(5) = '1' and reg_enoverlap_q(5)='0') 
+--			  or (reg_overlap_q(4) = '1' and reg_enoverlap_q(4)='0'))  
+--			  and (reg_overlap_q(7) = '0' and reg_overlap_q(3 downto 0) /="0000") then 
+--			  
+-- 			     reg_overlap_q(3 downto 0) <= "0000";
+--					
+--			 end if;
+
+
+--			
+			 
         end loop;
       end if;
       -- clear OVERLAP register upon read

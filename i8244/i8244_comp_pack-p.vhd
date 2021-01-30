@@ -124,9 +124,9 @@ package i8244_comp_pack is
       vpos_i            : in  pos_t;
       major_objs_i      : in  major_objs_t;
       major_quad_objs_i : in  major_quad_objs_t;
-      rom_addr_o        : out rom_addr_t;
-      rom_en_o          : out std_logic;
-      rom_data_i        : in  rom_data_t;
+      char_a_o          : out rom_addr_t;
+      char_en           : out std_logic;
+      char_d_i          : in  rom_data_t;
       major_pix_o       : out std_logic;
       major_attr_o      : out col_attr_t;
       major_coll_o      : out boolean

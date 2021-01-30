@@ -56,9 +56,9 @@ entity i8244_core is
     clk_en_i   : in  std_logic;
     res_n_i    : in  std_logic;
     -- ROM Interface ----------------------------------------------------------
-    rom_addr_o : out std_logic_vector(8 downto 0);
-    rom_en_o   : out std_logic;
-    rom_data_i : in  std_logic_vector(7 downto 0);
+    char_a_o : out std_logic_vector(8 downto 0);
+    char_en   : out std_logic;
+    char_d_i   : in  std_logic_vector(7 downto 0);
     -- I8244 Pads Interface ---------------------------------------------------
     intr_n_o   : out std_logic;
     stb_i      : in  std_logic;
@@ -229,9 +229,9 @@ begin
       vpos_i            => vpos_s,
       major_objs_i      => major_objs_s,
       major_quad_objs_i => major_quad_objs_s,
-      rom_addr_o        => rom_addr_o,
-      rom_en_o          => rom_en_o,
-      rom_data_i        => rom_data_i,
+      char_a_o          => char_a_o,
+      char_en           => char_en,
+      char_d_i          => char_d_i,
       major_pix_o       => major_pix_s,
       major_attr_o      => major_attr_s,
       major_coll_o      => major_coll_s

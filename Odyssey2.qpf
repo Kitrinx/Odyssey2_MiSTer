@@ -18,15 +18,16 @@
 # -------------------------------------------------------------------------- #
 #
 # Quartus Prime
-# Version 17.0.0 Build 595 04/25/2017 SJ Standard Edition
-# Date created = 20:50:25  December 12, 2018
+# Version 17.0.2 Build 602 07/19/2017 SJ Lite Edition
+# Date created = 20:47:11  January 30, 2021
 #
 # -------------------------------------------------------------------------- #
 
 QUARTUS_VERSION = "17.0"
-DATE = "20:50:25  December 12, 2018"
+DATE = "20:47:11  January 30, 2021"
 
 # Revisions
 
 PROJECT_REVISION = "Odyssey2"
-
+PROJECT_REVISION = "mister-vp"
+PROJECT_REVISION = "Videopac"

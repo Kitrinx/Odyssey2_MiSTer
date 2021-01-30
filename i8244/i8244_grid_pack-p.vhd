@@ -17,14 +17,14 @@ use work.i8244_pack.byte_array_t;
 
 package i8244_grid_pack is
 
-  subtype hbar_t  is std_logic_vector(8 downto 0);
-  type    hbars_t is array (natural range 0 to 8) of hbar_t;
+  subtype hbar_t  is std_logic_vector(9 downto 0);
+  type    hbars_t is array (natural range 0 to 9) of hbar_t;
 
   -- grid configuration
   type grid_bars_t is
     record
       hbars : hbars_t;
-      vbars : byte_array_t(0 to 9);
+      vbars : byte_array_t(0 to 10);
     end record;
   --
   type grid_cfg_t is

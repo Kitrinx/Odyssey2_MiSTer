@@ -36,6 +36,10 @@ package vp_console_comp_pack is
       cart_t0_i      : in  std_logic;
       cart_t0_o      : out std_logic;
       cart_t0_dir_o  : out std_logic;
+		-------------------------------------------------------------------------
+		char_a_o       : out std_logic_vector(8 downto 0);
+      char_d_i       : in  std_logic_vector(7 downto 0);
+		char_en        : out std_logic;
       -- Joystick Interface ---------------------------------------------------
       -- idx = 0 : left joystick
       -- idx = 1 : right joystick
