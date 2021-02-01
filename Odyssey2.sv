@@ -145,7 +145,7 @@ module emu
 `endif
 
 `ifdef USE_SDRAM
-	//SDRAM interface with lower latency
+   //SDRAM interface with lower latency
 	output        SDRAM_CLK,
 	output        SDRAM_CKE,
 	output [12:0] SDRAM_A,
@@ -201,9 +201,6 @@ assign {DDRAM_CLK, DDRAM_BURSTCNT, DDRAM_ADDR, DDRAM_DIN, DDRAM_BE, DDRAM_RD, DD
 
 assign VGA_F1 = 0;
 assign VGA_SCALER = 0;
-
-assign AUDIO_S = 0;
-assign AUDIO_MIX = 0;
 
 assign LED_DISK = 0;
 assign LED_POWER = 0;
@@ -586,12 +583,10 @@ wire [7:0] cart_di;
 // $E8, $E9, and $EA external rom banks
 // T0_i high if SP0256 command buffer full
 
-
-wire [15:0] audio_out = (VOICE? {voice_out[7:0], 6'd0} + {snd, 11'd0} : {snd, 12'd0});
-
-assign AUDIO_L = audio_out;
+assign AUDIO_L = VOICE ? {4'b0,snd,snd,4'b0} + voice_out * 2 :{2'b0, snd, snd,6'b0};//{audio, 6'd0};
 assign AUDIO_R = AUDIO_L;
-
+assign AUDIO_S = 1;
+assign AUDIO_MIX = 0;
 
 ////////////////////////////  VIDEO  ////////////////////////////////////
 
@@ -798,27 +793,20 @@ wire       joy_reset  = ~joya[5] & ~joyb[5];
 ////////////The Voice /////////////////////////////////////////////////
 
 
-reg signed [9:0] signed_voice_out;
-reg        [8:0] voice_out;
-
+reg signed [9:0] voice_out;
 wire ldq;
-
+         
 
 sp0256 sp0256 (
-		.clk_2m5    (clk_2m5),
-		.reset      (rst_a_n),
-		.lrq        (ldq),
-		.data_in    (rom_addr[6:0]),
-		.ald        (ald),
-		.audio_out  (signed_voice_out)
+               .clk_2m5    (clk_2m5),
+               .reset      (rst_a_n),
+               .lrq        (ldq),
+               .data_in    (rom_addr[6:0]),
+               .ald        (ald),
+               .audio_out  (signed_voice_out)
 );
 
-compressor compressor
-(
-		.clk  (clk_sys),
-		.din  ( signed_voice_out),
-		.dout ( voice_out)
-);
+
 
 wire ald     = !rom_addr[7] | cart_wr_n | cart_cs;
 wire rst_a_n;
@@ -827,13 +815,12 @@ wire rst_a_n;
 
 ls74 ls74
 (
-	.d     (cart_di[5]),
-	.clr   (VOICE? 1'b1: 1'b0),
-	.q     (rst_a_n),
-	.pre   (1'b1),
-	.clk   (ald)
+		 .d     (cart_di[5]),
+       .clr   (VOICE? 1'b1: 1'b0),
+       .q     (rst_a_n),
+       .pre   (1'b1),
+       .clk   (ald)
 );
-
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
