@@ -353,9 +353,9 @@ pll_cfg pll_cfg
 
 always @(posedge CLK_50M) begin : cfg_block
 	reg pald = 0, pald2 = 0;
-	reg [2:0] state = 0;
+	reg [3:0] state = 0;
 
-	pald  <= status[14];
+	pald <= status[14];
 	pald2 <= pald;
 
 	cfg_write <= 0;
@@ -363,23 +363,38 @@ always @(posedge CLK_50M) begin : cfg_block
 
 	if(!cfg_waitrequest) begin
 		if(state) state<=state+1'd1;
-		case(state)
-			1: begin
-					cfg_address <= 0;
-					cfg_data <= 0;
-					cfg_write <= 1;
+			case(state)
+				1: begin
+				cfg_address <= 0;
+				cfg_data <= 0;
+				cfg_write <= 1;
 				end
-			3: begin
-					cfg_address <= 7;
-					cfg_data <= pald2 ? 1932718791 : 644817110;
-					cfg_write <= 1;
+				5: begin
+				cfg_address <= 4;
+				cfg_data <= pald2 ? 'h00020605 : 'h00020504;
+				cfg_write <= 1;
 				end
-			5: begin
-					cfg_address <= 2;
-					cfg_data <= 0;
-					cfg_write <= 1;
+				7: begin
+				cfg_address <= 5;
+				cfg_data <= pald2 ? 'h00027271 : 'h00025F5E;
+				cfg_write <= 1;
 				end
-		endcase
+				9: begin
+				cfg_address <= 5;
+				cfg_data <= pald2 ? 'h00040404 : 'h00060605;
+				cfg_write <= 1;
+				end
+				11: begin
+				cfg_address <= 7;
+				cfg_data <= pald2 ? 'h5999999A : 'h7332F2C7;
+				cfg_write <= 1;
+				end
+				13: begin
+				cfg_address <= 2;
+				cfg_data <= 0;
+				cfg_write <= 1;
+				end
+			endcase
 	end
 end
 
