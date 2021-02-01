@@ -197,15 +197,12 @@ assign USER_OUT = '1;
 assign {UART_RTS, UART_TXD, UART_DTR} = 0;
 assign {SD_SCK, SD_MOSI, SD_CS} = 'Z;
 assign {SDRAM_DQ, SDRAM_A, SDRAM_BA, SDRAM_CLK, SDRAM_CKE, SDRAM_DQML, SDRAM_DQMH, SDRAM_nWE, SDRAM_nCAS, SDRAM_nRAS, SDRAM_nCS} = 'Z;
-assign {DDRAM_CLK, DDRAM_BURSTCNT, DDRAM_ADDR, DDRAM_DIN, DDRAM_BE, DDRAM_RD, DDRAM_WE} = '0;
+assign {DDRAM_CLK, DDRAM_BURSTCNT, DDRAM_ADDR, DDRAM_DIN, DDRAM_BE, DDRAM_RD, DDRAM_WE} = '0;  
 
-assign VGA_SL = 0;
 assign VGA_F1 = 0;
 assign VGA_SCALER = 0;
 
 assign AUDIO_S = 0;
-assign AUDIO_L = 0;
-assign AUDIO_R = 0;
 assign AUDIO_MIX = 0;
 
 assign LED_DISK = 0;
@@ -213,8 +210,8 @@ assign LED_POWER = 0;
 assign LED_USER  = ioctl_download;
 assign BUTTONS = 0;
 
-assign VIDEO_ARX = status[8] ? 8'd16 : 8'd4;
-assign VIDEO_ARY = status[8] ? 8'd9  : 8'd3;
+assign VIDEO_ARX = (!status[19:18]) ? (status[14] ? 12'd5 : 12'd4) : (status[19:18] - 1'd1);
+assign VIDEO_ARY = (!status[19:18]) ? (status[14] ? 12'd4 : 12'd3) : 12'd0;
 
 
 ////////////////////////////  HPS I/O  //////////////////////////////////
@@ -223,7 +220,7 @@ assign VIDEO_ARY = status[8] ? 8'd9  : 8'd3;
 // 0         1         2         3          4         5         6
 // 01234567890123456789012345678901 23456789012345678901234567890123
 // 0123456789ABCDEFGHIJKLMNOPQRSTUV 0123456789ABCDEFGHIJKLMNOPQRSTUV
-// XXXXXXXXXXXX  X
+// XXXXX XXXXXX  X   XX
 
 `include "build_id.v"
 parameter CONF_STR = {
@@ -237,10 +234,9 @@ parameter CONF_STR = {
 	"OE,System,Odyssey2,Videopac;",
 	"O6,Palette,Tv (RF),RGB;",
 	"O4,TV Set,Color,B/W;",
-	"O8,Aspect ratio,4:3,16:9;",
+	"OIJ,Aspect ratio,Original,Full Screen,[ARC1],[ARC2];",
 	"O9B,Scandoubler Fx,None,HQ2x,CRT 25%,CRT 50%,CRT 75%;",
-	"O1,The Voice,Off,on;",
-	"O5,Trim Overscan,No,Yes;",
+	"O1,The Voice,Off,On;",
 	"-;",
 	"O7,Swap Joysticks,No,Yes;",
 	"-;",
@@ -249,10 +245,11 @@ parameter CONF_STR = {
 	"V,v",`BUILD_DATE
 };
 
+wire forced_scandoubler;
 wire  [1:0] buttons;
 wire [31:0] status;
-wire        forced_scandoubler;
-
+wire [10:0] ps2_key;
+wire [21:0] gamma_bus;
 wire        ioctl_download;
 wire [24:0] ioctl_addr;
 wire [15:0] ioctl_dout;
@@ -268,6 +265,8 @@ hps_io #(.STRLEN($size(CONF_STR)>>3)) hps_io
 (
 	.clk_sys(clk_sys),
 	.HPS_BUS(HPS_BUS),
+	.EXT_BUS(),
+	.gamma_bus(gamma_bus),
 
 	.conf_str(CONF_STR),
 
@@ -282,6 +281,7 @@ hps_io #(.STRLEN($size(CONF_STR)>>3)) hps_io
 
 	.buttons(buttons),
 	.status(status),
+	.status_menumask({status[5]}),
 
 	.joystick_0(joystick_0),
 	.joystick_1(joystick_1),
@@ -304,20 +304,84 @@ wire [15:0] joyb = joy_swap ? joystick_0 : joystick_1;
 
 
 wire clock_locked;
-wire clk_sys_o2;
-wire clk_sys_vp;
 wire clk_2m5;
-wire clk_sys = PAL ? clk_sys_vp : clk_sys_o2;
+wire clk_sys;
+
+// pll pll
+// (
+// 	.refclk(CLK_50M),
+// 	.rst(0),
+// 	//.outclk_0(clk_sys_o2),
+// 	.outclk_0(clk_sys),
+// 	.outclk_1(clk_sys_vp),
+// 	.outclk_2(clk_2m5),
+// 	.locked(clock_locked)
+// );
+
+wire [63:0] reconfig_to_pll;
+wire [63:0] reconfig_from_pll;
 
 pll pll
 (
 	.refclk(CLK_50M),
 	.rst(0),
-	.outclk_0(clk_sys_o2),
-	.outclk_1(clk_sys_vp),
-	.outclk_2(clk_2m5),
+	.outclk_0(clk_2m5),
+	.outclk_1(clk_sys),
+	.reconfig_to_pll(reconfig_to_pll),
+	.reconfig_from_pll(reconfig_from_pll),
 	.locked(clock_locked)
 );
+
+wire        cfg_waitrequest;
+reg         cfg_write;
+reg   [5:0] cfg_address;
+reg  [31:0] cfg_data;
+
+pll_cfg pll_cfg
+(
+	.mgmt_clk(CLK_50M),
+	.mgmt_reset(0),
+	.mgmt_waitrequest(cfg_waitrequest),
+	.mgmt_read(0),
+	.mgmt_readdata(),
+	.mgmt_write(cfg_write),
+	.mgmt_address(cfg_address),
+	.mgmt_writedata(cfg_data),
+	.reconfig_to_pll(reconfig_to_pll),
+	.reconfig_from_pll(reconfig_from_pll)
+);
+
+always @(posedge CLK_50M) begin : cfg_block
+	reg pald = 0, pald2 = 0;
+	reg [2:0] state = 0;
+
+	pald  <= status[14];
+	pald2 <= pald;
+
+	cfg_write <= 0;
+	if(pald2 != pald) state <= 1;
+
+	if(!cfg_waitrequest) begin
+		if(state) state<=state+1'd1;
+		case(state)
+			1: begin
+					cfg_address <= 0;
+					cfg_data <= 0;
+					cfg_write <= 1;
+				end
+			3: begin
+					cfg_address <= 7;
+					cfg_data <= pald2 ? 1932718791 : 644817110;
+					cfg_write <= 1;
+				end
+			5: begin
+					cfg_address <= 2;
+					cfg_data <= 0;
+					cfg_write <= 1;
+				end
+		endcase
+	end
+end
 
 // hold machine in reset until first download starts
 reg old_pal = 0;
@@ -374,6 +438,8 @@ end
 
 ////////////////////////////  SYSTEM  ///////////////////////////////////
 
+wire cart_cs;
+wire cart_cs_n;
 
 vp_console vp
 (
@@ -506,7 +572,7 @@ wire [7:0] cart_di;
 // T0_i high if SP0256 command buffer full
 
 
-wire [15:0] audio_out = (VOICE?{snd,snd,snd,snd} | {voice_out[7:0],voice_out[7:0]}:{snd, snd, snd,snd}) ;
+wire [15:0] audio_out = (VOICE? {voice_out[7:0], 6'd0} + {snd, 11'd0} : {snd, 12'd0});
 
 assign AUDIO_L = audio_out;
 assign AUDIO_R = AUDIO_L;
@@ -537,14 +603,6 @@ assign VGA_F1 = 0;
 wire [2:0] scale = status[11:9];
 wire [2:0] sl = scale ? scale - 1'd1 : 3'd0;
 
-reg [15:0] ce_h_cnt;
-reg old_h;
-
-always @(posedge ce_pix) begin
-	old_h <= HSync;
-	ce_h_cnt <= (~old_h & HSync) ? 16'd0 : (ce_h_cnt + 16'd1);
-end
-
 
 wire [9:0] grayscale;
 vga_to_greyscale vga_to_greyscale
@@ -559,11 +617,11 @@ vga_to_greyscale vga_to_greyscale
 video_mixer #(.LINE_LENGTH(455)) video_mixer
 (
 	.*,
-	.HBlank(status[5] ? ((ce_h_cnt <= 46) || (ce_h_cnt >= 367)) : HBlank),
+	.clk_vid(clk_sys),
+	.HBlank(HBlank),
 	.VBlank(VBlank),
 	.HSync(~HSync),
 	.VSync(~VSync),
-	.clk_sys(CLK_VIDEO),
 	.ce_pix_out(CE_PIXEL),
 
 	.scandoubler(scale || forced_scandoubler),
@@ -573,7 +631,7 @@ video_mixer #(.LINE_LENGTH(455)) video_mixer
 
 	.R(SCREEN ? grayscale[9:2] : colors[23:16]),
 	.G(SCREEN ? grayscale[9:2] : colors[15:8] ),
-	.B(SCREEN ? grayscale[9:2] : colors[7:0]  ),
+	.B(SCREEN ? grayscale[9:2] : colors[7:0]  )
 
 );
 
@@ -592,7 +650,6 @@ wire [6:1] kb_dec;
 wire [14:7] kb_enc;
 wire kb_read_ack;
 
-wire [10:0] ps2_key;
 reg [7:0] ps2_ascii;
 reg ps2_changed;
 reg ps2_released;
@@ -738,7 +795,7 @@ sp0256 sp0256 (
 		.lrq        (ldq),
 		.data_in    (rom_addr[6:0]),
 		.ald        (ald),
-		.audio_out  (signed_voice_out),
+		.audio_out  (signed_voice_out)
 );
 
 compressor compressor

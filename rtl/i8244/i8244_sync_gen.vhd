@@ -85,12 +85,21 @@ architecture rtl of i8244_sync_gen is
   -- last horizontal blank defines horizontal interval:
   --   (228 * 2) - 1 = 455
   constant last_hpos_c       : pos_t := to_pos_f(455);
-  constant last_hblank_c     : pos_t := last_hpos_c - to_pos_f(0);
+  constant last_hblank_c     : pos_t := last_hpos_c - to_pos_f(16);
   constant first_hblank_c    : pos_t := last_hblank_c - to_pos_f(87);
   constant first_hsync_c     : pos_t := first_hblank_c + to_pos_f(10);
   constant last_hsync_c      : pos_t := first_hsync_c + to_pos_f(34-1);
   constant first_bg_c        : pos_t := first_hblank_c + to_pos_f(48);
   constant last_bg_c         : pos_t := first_bg_c + to_pos_f(18-1);
+
+  -- constant last_hpos_c       : pos_t := to_pos_f(455);
+  -- constant last_hblank_c     : pos_t := to_pos_f(455); -- 455 -- 87 total
+  -- constant first_hblank_c    : pos_t := to_pos_f(368); -- 368
+  -- constant first_hsync_c     : pos_t := to_pos_f(378); -- 378 -- 33 total
+  -- constant last_hsync_c      : pos_t := to_pos_f(411); -- 411
+  -- constant first_bg_c        : pos_t := to_pos_f(426); -- 426
+  -- constant last_bg_c         : pos_t := to_pos_f(443); -- 443
+
   -- horizontal interrupt starts 20 us before hblank
   constant first_hor_int_c   : pos_t := first_hblank_c - to_pos_f(142);
   -- and ends 5 us before end of hblank
@@ -102,7 +111,7 @@ architecture rtl of i8244_sync_gen is
     is_pal_c  => to_pos_f(312));
   constant first_vblank_c    : pos_t := last_vis_line_c + to_pos_f(0);
   constant last_vblank_c     : limits_t := (
-    is_ntsc_c => to_pos_f(0),
+    is_ntsc_c => to_pos_f(1),
     is_pal_c  => to_pos_f(0));
   constant first_vsync_c     : pos_t := first_vblank_c + to_pos_f(16);
   constant last_vsync_c      : pos_t := first_vsync_c + to_pos_f(5);
@@ -201,7 +210,15 @@ begin
           -- hbl
           if    hpos_q = first_hblank_c - 1 then
             hbl_q   <= '1';
-          elsif hpos_q = last_hblank_c then
+          elsif hpos_q = last_hblank_c and vpos_q < last_vis_line_c then
+            hbl_q   <= '0';
+          end if;
+
+          if hpos_q = last_hpos_c and vpos_q >= last_vis_line_c then
+            hbl_q   <= '0';
+          end if;
+
+          if hpos_q = last_hsync_c and vpos_q = 0 then
             hbl_q   <= '0';
           end if;
 
