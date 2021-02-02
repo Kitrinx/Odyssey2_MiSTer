@@ -50,7 +50,7 @@ module emu
 	input         RESET,
 
 	//Must be passed to hps_io module
-	inout  [44:0] HPS_BUS,
+	inout  [45:0] HPS_BUS,
 
 	//Base video clock. Usually equals to CLK_SYS.
 	output        CLK_VIDEO,
@@ -60,8 +60,8 @@ module emu
 	output        CE_PIXEL,
 
 	//Video aspect ratio for HDMI. Most retro systems have ratio 4:3.
-	output  [7:0] VIDEO_ARX,
-	output  [7:0] VIDEO_ARY,
+	output [11:0] VIDEO_ARX,
+	output [11:0] VIDEO_ARY,
 
 	output  [7:0] VGA_R,
 	output  [7:0] VGA_G,
@@ -71,6 +71,34 @@ module emu
 	output        VGA_DE,    // = ~(VBlank | HBlank)
 	output        VGA_F1,
 	output [1:0]  VGA_SL,
+	output        VGA_SCALER, // Force VGA scaler
+
+`ifdef USE_FB
+	// Use framebuffer in DDRAM (USE_FB=1 in qsf)
+	// FB_FORMAT:
+	//    [2:0] : 011=8bpp(palette) 100=16bpp 101=24bpp 110=32bpp
+	//    [3]   : 0=16bits 565 1=16bits 1555
+	//    [4]   : 0=RGB  1=BGR (for 16/24/32 modes)
+	//
+	// FB_STRIDE either 0 (rounded to 256 bytes) or multiple of pixel size (in bytes)
+	output        FB_EN,
+	output  [4:0] FB_FORMAT,
+	output [11:0] FB_WIDTH,
+	output [11:0] FB_HEIGHT,
+	output [31:0] FB_BASE,
+	output [13:0] FB_STRIDE,
+	input         FB_VBL,
+	input         FB_LL,
+	output        FB_FORCE_BLANK,
+
+	// Palette control for 8bit modes.
+	// Ignored for other video modes.
+	output        FB_PAL_CLK,
+	output  [7:0] FB_PAL_ADDR,
+	output [23:0] FB_PAL_DOUT,
+	input  [23:0] FB_PAL_DIN,
+	output        FB_PAL_WR,
+`endif
 
 	output        LED_USER,  // 1 - ON, 0 - OFF.
 
@@ -80,19 +108,28 @@ module emu
 	output  [1:0] LED_POWER,
 	output  [1:0] LED_DISK,
 
+	// I/O board button press simulation (active high)
+	// b[1]: user button
+	// b[0]: osd button
+	output  [1:0] BUTTONS,
+
+	input         CLK_AUDIO, // 24.576 MHz
 	output [15:0] AUDIO_L,
 	output [15:0] AUDIO_R,
-	output        AUDIO_S, // 1 - signed audio samples, 0 - unsigned
+	output        AUDIO_S,   // 1 - signed audio samples, 0 - unsigned
 	output  [1:0] AUDIO_MIX, // 0 - no mix, 1 - 25%, 2 - 50%, 3 - 100% (mono)
-	input         TAPE_IN,
 
-	// SD-SPI
+	//ADC
+	inout   [3:0] ADC_BUS,
+
+	//SD-SPI
 	output        SD_SCK,
 	output        SD_MOSI,
 	input         SD_MISO,
 	output        SD_CS,
 	input         SD_CD,
 
+`ifdef USE_DDRAM
 	//High latency DDR3 RAM interface
 	//Use for non-critical time purposes
 	output        DDRAM_CLK,
@@ -105,9 +142,10 @@ module emu
 	output [63:0] DDRAM_DIN,
 	output  [7:0] DDRAM_BE,
 	output        DDRAM_WE,
-	output [1:0]  BUFFERMODE,
+`endif
 
-	//SDRAM interface with lower latency
+`ifdef USE_SDRAM
+   //SDRAM interface with lower latency
 	output        SDRAM_CLK,
 	output        SDRAM_CKE,
 	output [12:0] SDRAM_A,
@@ -119,34 +157,67 @@ module emu
 	output        SDRAM_nCAS,
 	output        SDRAM_nRAS,
 	output        SDRAM_nWE,
+`endif
+
+`ifdef DUAL_SDRAM
+	//Secondary SDRAM
+	input         SDRAM2_EN,
+	output        SDRAM2_CLK,
+	output [12:0] SDRAM2_A,
+	output  [1:0] SDRAM2_BA,
+	inout  [15:0] SDRAM2_DQ,
+	output        SDRAM2_nCS,
+	output        SDRAM2_nCAS,
+	output        SDRAM2_nRAS,
+	output        SDRAM2_nWE,
+`endif
 
 	input         UART_CTS,
 	output        UART_RTS,
 	input         UART_RXD,
 	output        UART_TXD,
 	output        UART_DTR,
-	input         UART_DSR
+	input         UART_DSR,
+
+	// Open-drain User port.
+	// 0 - D+/RX
+	// 1 - D-/TX
+	// 2..6 - USR2..USR6
+	// Set USER_OUT to 1 to read from USER_IN.
+	input   [6:0] USER_IN,
+	output  [6:0] USER_OUT,
+
+	input         OSD_STATUS
 );
 
+///////// Default values for ports not used in this core /////////
+
+assign ADC_BUS  = 'Z;
+assign USER_OUT = '1;
 assign {UART_RTS, UART_TXD, UART_DTR} = 0;
-
-assign AUDIO_S   = 0;
-assign AUDIO_MIX = 0;
-
-assign LED_USER  = ioctl_download;
-assign LED_DISK  = 0;
-assign LED_POWER = 0;
-
-assign VIDEO_ARX = status[8] ? 8'd16 : 8'd4;
-assign VIDEO_ARY = status[8] ? 8'd9  : 8'd3;
-
-assign {SDRAM_DQ, SDRAM_A, SDRAM_BA, SDRAM_CKE, SDRAM_CLK, SDRAM_DQML, SDRAM_DQMH, SDRAM_nWE, SDRAM_nCAS, SDRAM_nRAS, SDRAM_nCS} = 'Z;
-assign {DDRAM_CLK, DDRAM_BURSTCNT, DDRAM_ADDR, DDRAM_DIN, DDRAM_BE, DDRAM_RD, DDRAM_WE} = 0;
 assign {SD_SCK, SD_MOSI, SD_CS} = 'Z;
+assign {SDRAM_DQ, SDRAM_A, SDRAM_BA, SDRAM_CLK, SDRAM_CKE, SDRAM_DQML, SDRAM_DQMH, SDRAM_nWE, SDRAM_nCAS, SDRAM_nRAS, SDRAM_nCS} = 'Z;
+assign {DDRAM_CLK, DDRAM_BURSTCNT, DDRAM_ADDR, DDRAM_DIN, DDRAM_BE, DDRAM_RD, DDRAM_WE} = '0;  
+
+assign VGA_F1 = 0;
+assign VGA_SCALER = 0;
+
+assign LED_DISK = 0;
+assign LED_POWER = 0;
+assign LED_USER  = ioctl_download;
+assign BUTTONS = 0;
+
+assign VIDEO_ARX = (!status[19:18]) ? (status[14] ? 12'd5 : 12'd4) : (status[19:18] - 1'd1);
+assign VIDEO_ARY = (!status[19:18]) ? (status[14] ? 12'd4 : 12'd3) : 12'd0;
 
 
 ////////////////////////////  HPS I/O  //////////////////////////////////
 
+// Status Bit Map:
+// 0         1         2         3          4         5         6
+// 01234567890123456789012345678901 23456789012345678901234567890123
+// 0123456789ABCDEFGHIJKLMNOPQRSTUV 0123456789ABCDEFGHIJKLMNOPQRSTUV
+// XXXXX XXXXXX  X   XX
 
 `include "build_id.v"
 parameter CONF_STR = {
@@ -154,17 +225,15 @@ parameter CONF_STR = {
 	"-;",
 	"F1,BIN,Load catridge;",
 	"F2,ROM,Load XROM;",
-   "-;",
+	"-;",
 	"F3,CHR,Change VDC font;",
 	"-;",
 	"OE,System,Odyssey2,Videopac;",
 	"O6,Palette,Tv (RF),RGB;",
 	"O4,TV Set,Color,B/W;",
-	"O8,Aspect ratio,4:3,16:9;",
+	"OIJ,Aspect ratio,Original,Full Screen,[ARC1],[ARC2];",
 	"O9B,Scandoubler Fx,None,HQ2x,CRT 25%,CRT 50%,CRT 75%;",
-	"O1,The Voice,Off,on;",
-	"OGH,Buffering,Triple,Single,Low Latency;",
-	"O5,Trim Overscan,No,Yes;",
+	"O1,The Voice,Off,On;",
 	"-;",
 	"O7,Swap Joysticks,No,Yes;",
 	"-;",
@@ -173,10 +242,11 @@ parameter CONF_STR = {
 	"V,v",`BUILD_DATE
 };
 
+wire forced_scandoubler;
 wire  [1:0] buttons;
 wire [31:0] status;
-wire        forced_scandoubler;
-
+wire [10:0] ps2_key;
+wire [21:0] gamma_bus;
 wire        ioctl_download;
 wire [24:0] ioctl_addr;
 wire [15:0] ioctl_dout;
@@ -192,6 +262,8 @@ hps_io #(.STRLEN($size(CONF_STR)>>3)) hps_io
 (
 	.clk_sys(clk_sys),
 	.HPS_BUS(HPS_BUS),
+	.EXT_BUS(),
+	.gamma_bus(gamma_bus),
 
 	.conf_str(CONF_STR),
 
@@ -203,17 +275,16 @@ hps_io #(.STRLEN($size(CONF_STR)>>3)) hps_io
 	.ioctl_index(ioctl_index),
 
 	.forced_scandoubler(forced_scandoubler),
-	
+
 	.buttons(buttons),
 	.status(status),
+	.status_menumask({status[5]}),
 
 	.joystick_0(joystick_0),
 	.joystick_1(joystick_1),
 
 	.ps2_key(ps2_key)
 );
-
-assign BUFFERMODE = (status[17:16] == 2'b00) ? 2'b01 : (status[17:16] == 2'b01) ? 2'b00 : 2'b10;
 
 wire       PAL = status[14];
 wire       joy_swap = status[7];
@@ -230,20 +301,99 @@ wire [15:0] joyb = joy_swap ? joystick_0 : joystick_1;
 
 
 wire clock_locked;
-wire clk_sys_o2;
-wire clk_sys_vp;
 wire clk_2m5;
-wire clk_sys = PAL ? clk_sys_vp : clk_sys_o2;
+wire clk_sys;
+
+// pll pll
+// (
+// 	.refclk(CLK_50M),
+// 	.rst(0),
+// 	//.outclk_0(clk_sys_o2),
+// 	.outclk_0(clk_sys),
+// 	.outclk_1(clk_sys_vp),
+// 	.outclk_2(clk_2m5),
+// 	.locked(clock_locked)
+// );
+
+wire [63:0] reconfig_to_pll;
+wire [63:0] reconfig_from_pll;
 
 pll pll
 (
 	.refclk(CLK_50M),
 	.rst(0),
-	.outclk_0(clk_sys_o2),
-	.outclk_1(clk_sys_vp),
-	.outclk_2(clk_2m5),
+	.outclk_0(clk_2m5),
+	.outclk_1(clk_sys),
+	.reconfig_to_pll(reconfig_to_pll),
+	.reconfig_from_pll(reconfig_from_pll),
 	.locked(clock_locked)
 );
+
+wire        cfg_waitrequest;
+reg         cfg_write;
+reg   [5:0] cfg_address;
+reg  [31:0] cfg_data;
+
+pll_cfg pll_cfg
+(
+	.mgmt_clk(CLK_50M),
+	.mgmt_reset(0),
+	.mgmt_waitrequest(cfg_waitrequest),
+	.mgmt_read(0),
+	.mgmt_readdata(),
+	.mgmt_write(cfg_write),
+	.mgmt_address(cfg_address),
+	.mgmt_writedata(cfg_data),
+	.reconfig_to_pll(reconfig_to_pll),
+	.reconfig_from_pll(reconfig_from_pll)
+);
+
+always @(posedge CLK_50M) begin : cfg_block
+	reg pald = 0, pald2 = 0;
+	reg [3:0] state = 0;
+
+	pald <= status[14];
+	pald2 <= pald;
+
+	cfg_write <= 0;
+	if(pald2 != pald) state <= 1;
+
+	if(!cfg_waitrequest) begin
+		if(state) state<=state+1'd1;
+			case(state)
+				1: begin
+				cfg_address <= 0;
+				cfg_data <= 0;
+				cfg_write <= 1;
+				end
+				5: begin
+				cfg_address <= 4;
+				cfg_data <= pald2 ? 'h00020605 : 'h00020504;
+				cfg_write <= 1;
+				end
+				7: begin
+				cfg_address <= 5;
+				cfg_data <= pald2 ? 'h00027271 : 'h00025F5E;
+				cfg_write <= 1;
+				end
+				9: begin
+				cfg_address <= 5;
+				cfg_data <= pald2 ? 'h00040404 : 'h00060605;
+				cfg_write <= 1;
+				end
+				11: begin
+				cfg_address <= 7;
+				cfg_data <= pald2 ? 'h5999999A : 'h7332F2C7;
+				cfg_write <= 1;
+				end
+				13: begin
+				cfg_address <= 2;
+				cfg_data <= 0;
+				cfg_write <= 1;
+				end
+			endcase
+	end
+end
 
 // hold machine in reset until first download starts
 reg old_pal = 0;
@@ -256,7 +406,7 @@ wire reset = buttons[1] | status[0] | ioctl_download | (old_pal != PAL);
 
 // Original Clocks:
 // Standard    NTSC           PAL
-// Sys clock   42.95454       70.9379 
+// Sys clock   42.95454       70.9379
 // Main clock  21.47727 MHz   35.46895 MHz // ntsc/pal colour carrier times 3/4 respectively
 // VDC divider 3              5
 // VDC clock   7.159 MHz      7.094 MHz
@@ -300,6 +450,8 @@ end
 
 ////////////////////////////  SYSTEM  ///////////////////////////////////
 
+wire cart_cs;
+wire cart_cs_n;
 
 vp_console vp
 (
@@ -308,7 +460,7 @@ vp_console vp
 	.clk_i          (clk_sys),
 	.clk_cpu_en_i   (clk_cpu_en),
 	.clk_vdc_en_i   (clk_vdc_en),
-	
+
 	.res_n_i        (~reset & joy_reset), // low to reset
 
 	// Cart Data
@@ -349,9 +501,9 @@ vp_console vp
 	.vsync_n_o      (VSync),
 	.hbl_o          (HBlank),
 	.vbl_o          (VBlank),
-	
+
 	// Sound
-	.snd_o          (snd_o),
+	.snd_o          (),
 	.snd_vec_o      (snd)
 );
 
@@ -394,7 +546,7 @@ reg old_download = 0;
 
 always @(posedge clk_sys) begin
 	old_download <= ioctl_download;
-	
+
 	if (~old_download & ioctl_download)
 	begin
 		cart_size <= 16'd0;
@@ -409,15 +561,15 @@ always @(*)
   begin
    if (XROM == 1'b1)
 	   rom_addr <= {2'b0, cart_addr[11:0]};
-	else	    
-    case (cart_size)
-      16'h1000 : rom_addr <= {1'b0,cart_bank_0, cart_addr[11], cart_addr[9:0]};  //4k
-      16'h2000 : rom_addr <= {cart_bank_1,cart_bank_0, cart_addr[11], cart_addr[9:0]};   //8K
-      16'h4000 : rom_addr <= {cart_bank_1,cart_bank_0, cart_addr[11:0]}; //12K (16k banked)
-      default  : rom_addr <= {1'b0, cart_addr[11], cart_addr[9:0]};
-    endcase
+	else
+	case (cart_size)
+	  16'h1000 : rom_addr <= {1'b0,cart_bank_0, cart_addr[11], cart_addr[9:0]};  //4k
+	  16'h2000 : rom_addr <= {cart_bank_1,cart_bank_0, cart_addr[11], cart_addr[9:0]};   //8K
+	  16'h4000 : rom_addr <= {cart_bank_1,cart_bank_0, cart_addr[11:0]}; //12K (16k banked)
+	  default  : rom_addr <= {1'b0, cart_addr[11], cart_addr[9:0]};
+	endcase
   end
-  
+
 ////////////////////////////  SOUND  ////////////////////////////////////
 
 wire [3:0] snd;
@@ -431,12 +583,10 @@ wire [7:0] cart_di;
 // $E8, $E9, and $EA external rom banks
 // T0_i high if SP0256 command buffer full
 
-
-wire [15:0] audio_out = (VOICE?{snd,snd,snd,snd} | {voice_out[7:0],voice_out[7:0]}:{snd, snd, snd,snd}) ;
-
-assign AUDIO_L = audio_out;
+assign AUDIO_L = VOICE ? {4'b0,snd,snd,4'b0} + voice_out * 2 :{2'b0, snd, snd,6'b0};//{audio, 6'd0};
 assign AUDIO_R = AUDIO_L;
-
+assign AUDIO_S = 1;
+assign AUDIO_MIX = 0;
 
 ////////////////////////////  VIDEO  ////////////////////////////////////
 
@@ -463,33 +613,25 @@ assign VGA_F1 = 0;
 wire [2:0] scale = status[11:9];
 wire [2:0] sl = scale ? scale - 1'd1 : 3'd0;
 
-reg [15:0] ce_h_cnt;
-reg old_h;
-
-always @(posedge ce_pix) begin
-	old_h <= HSync;
-	ce_h_cnt <= (~old_h & HSync) ? 16'd0 : (ce_h_cnt + 16'd1);
-end
-
 
 wire [9:0] grayscale;
 vga_to_greyscale vga_to_greyscale
 (
-  .r_in  ({colors[23:18],colors[23:20]}),
-  .g_in  ({colors[15:10],colors[15:12]}),
-  .b_in  ({colors[7:2],colors[7:4]}),
-  .y_out (grayscale) 
+	.r_in  ({colors[23:18],colors[23:20]}),
+	.g_in  ({colors[15:10],colors[15:12]}),
+	.b_in  ({colors[7:2],colors[7:4]}),
+	.y_out (grayscale)
 );
 
 
 video_mixer #(.LINE_LENGTH(455)) video_mixer
 (
 	.*,
-	.HBlank(status[5] ? ((ce_h_cnt <= 46) || (ce_h_cnt >= 367)) : HBlank),
+	.clk_vid(clk_sys),
+	.HBlank(HBlank),
 	.VBlank(VBlank),
 	.HSync(~HSync),
 	.VSync(~VSync),
-	.clk_sys(CLK_VIDEO),
 	.ce_pix_out(CE_PIXEL),
 
 	.scandoubler(scale || forced_scandoubler),
@@ -499,7 +641,7 @@ video_mixer #(.LINE_LENGTH(455)) video_mixer
 
 	.R(SCREEN ? grayscale[9:2] : colors[23:16]),
 	.G(SCREEN ? grayscale[9:2] : colors[15:8] ),
-	.B(SCREEN ? grayscale[9:2] : colors[7:0]  ),
+	.B(SCREEN ? grayscale[9:2] : colors[7:0]  )
 
 );
 
@@ -518,7 +660,6 @@ wire [6:1] kb_dec;
 wire [14:7] kb_enc;
 wire kb_read_ack;
 
-wire [10:0] ps2_key;
 reg [7:0] ps2_ascii;
 reg ps2_changed;
 reg ps2_released;
@@ -529,7 +670,7 @@ reg joy_released;
 
 wire [9:0] joy_numpad = (joya[15:6] | joyb[15:6]);
 
-// If the user tries hard enough with the gamepad they can get keys stuck 
+// If the user tries hard enough with the gamepad they can get keys stuck
 // until they press them again. This could stand to be improved in the future.
 
 always @(posedge clk_sys) begin
@@ -538,13 +679,13 @@ always @(posedge clk_sys) begin
 
 	old_state <= ps2_key[10];
 	old_joy <= joy_numpad;
-	
+
 	ps2_changed <= (old_state != ps2_key[10]);
 	ps2_released <= ~ps2_key[9];
-	
+
 	joy_changed <= (joy_numpad ^ old_joy);
 	joy_released <= (joy_numpad ? 1'b0 : 1'b1);
-	
+
 	if(old_state != ps2_key[10]) begin
 		casex(ps2_key[8:0])
 			'hX16: ps2_ascii <= "1"; // 1
@@ -557,7 +698,7 @@ always @(posedge clk_sys) begin
 			'hX3E: ps2_ascii <= "8"; // 8
 			'hX46: ps2_ascii <= "9"; // 9
 			'hX45: ps2_ascii <= "0"; // 0
-			
+
 			'hX1C: ps2_ascii <= "a"; // a
 			'hX32: ps2_ascii <= "b"; // b
 			'hX21: ps2_ascii <= "c"; // c
@@ -585,7 +726,7 @@ always @(posedge clk_sys) begin
 			'hX35: ps2_ascii <= "y"; // y
 			'hX1A: ps2_ascii <= "z"; // z
 			'hX29: ps2_ascii <= " "; // space
-			
+
 			'hX79: ps2_ascii <= "+"; // +
 			'hX7B: ps2_ascii <= "-"; // -
 			'hX7C: ps2_ascii <= "*"; // *
@@ -619,7 +760,7 @@ always @(posedge clk_sys) begin
 		else if (joy_numpad[9])
 			joy_ascii <= "0";
 		else
-			joy_ascii <= 8'h00;		
+			joy_ascii <= 8'h00;
 	end
 end
 
@@ -629,7 +770,7 @@ vp_keymap vp_keymap
 	.res_n_i(~reset),
 	.keyb_dec_i(kb_dec),
 	.keyb_enc_o(kb_enc),
-	
+
 	.rx_data_ready_i(ps2_changed || joy_changed),
 	.rx_ascii_i(ps2_changed ? ps2_ascii : joy_ascii),
 	.rx_released_i(ps2_released && joy_released),
@@ -652,27 +793,20 @@ wire       joy_reset  = ~joya[5] & ~joyb[5];
 ////////////The Voice /////////////////////////////////////////////////
 
 
-reg signed [9:0] signed_voice_out;
-reg        [8:0] voice_out;
-    
+reg signed [9:0] voice_out;
 wire ldq;
          
 
 sp0256 sp0256 (
-        .clk_2m5    (clk_2m5),
-        .reset      (rst_a_n),
-        .lrq        (ldq),
-        .data_in    (rom_addr[6:0]),
-        .ald        (ald),
-        .audio_out  (signed_voice_out),
+               .clk_2m5    (clk_2m5),
+               .reset      (rst_a_n),
+               .lrq        (ldq),
+               .data_in    (rom_addr[6:0]),
+               .ald        (ald),
+               .audio_out  (signed_voice_out)
 );
 
-compressor compressor
-(
-        .clk  (clk_sys),
-        .din  ( signed_voice_out),
-        .dout ( voice_out)
-);
+
 
 wire ald     = !rom_addr[7] | cart_wr_n | cart_cs;
 wire rst_a_n;
@@ -681,15 +815,14 @@ wire rst_a_n;
 
 ls74 ls74
 (
-  .d     (cart_di[5]),
-  .clr   (VOICE? 1'b1: 1'b0),
-  .q     (rst_a_n),
-  .pre   (1'b1),
-  .clk   (ald)
+		 .d     (cart_di[5]),
+       .clr   (VOICE? 1'b1: 1'b0),
+       .q     (rst_a_n),
+       .pre   (1'b1),
+       .clk   (ald)
 );
 
-
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////	
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 // LUT using calibrated palette
 wire [23:0] color_lut_ntsc[16] = '{
@@ -707,7 +840,7 @@ wire [23:0] color_lut_ntsc[16] = '{
 	24'hdc84e8,
 	24'h77670b,
 	24'hc6b86a,
-	24'hcecece,     //WHITE 
+	24'hcecece,     //WHITE
 	24'hffffff      //WHITE LUMA
 };
 
@@ -722,11 +855,11 @@ wire [23:0] color_lut_pal[16] = '{
 	24'h49ffff,
 	24'hB60000,    //RED
 	24'hff4949,    //RED LUMA
-	24'hb600b6,    //magenta     
+	24'hb600b6,    //magenta
 	24'hff49ff,
-	24'hb6b600,    //Yellow    
+	24'hb6b600,    //Yellow
 	24'hffff49,
-	24'hb6b6b6,     //WHITE 
+	24'hb6b6b6,     //WHITE
 	24'hffffff      //WHITE LUMA
 };
 
